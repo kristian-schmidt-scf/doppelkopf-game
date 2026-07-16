@@ -62,6 +62,8 @@ header h1 {
 }
 .rules summary { cursor: pointer; color: var(--accent); }
 .rules-content { margin-top: 6px; max-height: 220px; overflow-y: auto; line-height: 1.4; }
+.rules-content ul { margin: 4px 0; padding-left: 20px; }
+.rules-content li { margin-bottom: 4px; }
 
 main {
   grid-area: main;
@@ -151,6 +153,21 @@ main {
   white-space: nowrap;
 }
 
+.game-type-banner {
+  position: absolute;
+  top: -30px;
+  left: 50%;
+  transform: translateX(-50%);
+  font-size: 13px;
+  font-weight: 700;
+  color: #f0e6c8;
+  background: rgba(0,0,0,0.5);
+  padding: 3px 12px;
+  border-radius: 10px;
+  white-space: nowrap;
+}
+.game-type-banner:empty { display: none; }
+
 .hand-area {
   grid-area: hand;
   padding: 10px 18px 18px;
@@ -186,6 +203,31 @@ main {
 }
 .announce-btn:hover:not(:disabled) { background: var(--accent); color: #111; }
 .announce-btn:disabled { opacity: 0.3; border-color: #555; color: #555; cursor: default; }
+
+.bidding-panel {
+  margin-top: 10px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  background: #1c1c10;
+  border: 1px solid var(--accent);
+  border-radius: 8px;
+  padding: 8px 10px;
+}
+.bidding-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+
+.settings-panel {
+  margin-top: 10px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  font-size: 13px;
+  color: #ccc;
+}
+.settings-panel label { display: flex; align-items: center; gap: 4px; cursor: pointer; }
+.settings-panel input[type="checkbox"] { accent-color: var(--accent); cursor: pointer; }
 
 .controls { margin-top: 10px; display: flex; gap: 10px; }
 .controls button {
@@ -259,7 +301,7 @@ main {
 #modal h2 { color: var(--accent); margin-top: 0; }
 #modal table { width: 100%; border-collapse: collapse; margin: 10px 0; font-size: 14px; }
 #modal td, #modal th { padding: 4px 6px; border-bottom: 1px solid #333; text-align: left; }
-#modal .modal-actions { margin-top: 16px; display: flex; gap: 10px; }
+#modal .modal-actions { margin-top: 16px; display: flex; gap: 10px; flex-wrap: wrap; }
 #modal button {
   background: var(--accent);
   color: #111;

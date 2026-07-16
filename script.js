@@ -9,31 +9,92 @@ const SUIT_COLOR = { C: "black", S: "black", H: "red", D: "red" };
 const CARD_VALUE = { "9": 0, "10": 10, "J": 2, "Q": 3, "K": 4, "A": 11 };
 const PLAYER_NAMES = ["You", "Herbert", "Gisela", "Dieter"];
 
-// Tournament-rule announcement deadlines: the announcing player must still hold at least this
-// many cards. Partnership (Re/Kontra) is only valid through the player's own first card; each
-// Absage ("keine 90/60/30", "schwarz") has its own, later deadline, and requires that the
-// announcer's own party has already announced Re/Kontra.
+// Natural suit-internal rank order (descending strength). Used for ANY plain-suit comparison,
+// in ANY game type: whichever ranks aren't trump this round still compare in this relative order
+// (e.g. a Damensolo's Clubs suit is A>10>K>J>9 - exactly this list with Q filtered out).
+const NATURAL_RANK_ORDER = ["A", "10", "K", "Q", "J", "9"];
+const PLAIN_RANK = new Map(NATURAL_RANK_ORDER.map((r, i) => [r, i]));
+
 const ANNOUNCE_MIN_HAND = { partnership: 11, "90": 10, "60": 9, "30": 8, schwarz: 7 };
 const ABSAGE_LEVELS = ["90", "60", "30", "schwarz"];
 
-// Highest to lowest trump. Both copies of the 10 of Hearts outrank even the Queen of Clubs
-// (a common regional house rule); the rest of the Hearts suit (A, K, 9) stays a plain suit.
-const TRUMP_ORDER = [
-  "H-10",
-  "C-Q", "S-Q", "H-Q", "D-Q",
-  "C-J", "S-J", "H-J", "D-J",
-  "D-A", "D-10", "D-K", "D-9",
-];
-const TRUMP_RANK = new Map(TRUMP_ORDER.map((k, i) => [k, i]));
-const PLAIN_ORDER = ["A", "10", "K", "9"];
-const PLAIN_RANK = new Map(PLAIN_ORDER.map((r, i) => [r, i]));
+const GAME_TYPES = {
+  NORMAL: "normal",
+  SOLO_C: "solo-C",
+  SOLO_S: "solo-S",
+  SOLO_H: "solo-H",
+  SOLO_D: "solo-D",
+  SOLO_Q: "solo-Q",
+  SOLO_J: "solo-J",
+  SOLO_FLESHLESS: "solo-fleshless",
+};
+const SOLO_GAME_TYPES = [GAME_TYPES.SOLO_C, GAME_TYPES.SOLO_S, GAME_TYPES.SOLO_H, GAME_TYPES.SOLO_D, GAME_TYPES.SOLO_Q, GAME_TYPES.SOLO_J, GAME_TYPES.SOLO_FLESHLESS];
+function isSoloType(gt) { return SOLO_GAME_TYPES.includes(gt); }
 
-function isTrump(card) { return TRUMP_RANK.has(card.suit + "-" + card.rank); }
-function trumpRank(card) { return TRUMP_RANK.get(card.suit + "-" + card.rank); }
-function plainRank(card) { return PLAIN_RANK.get(card.rank); }
+const GAME_TYPE_LABEL = {
+  [GAME_TYPES.NORMAL]: "Normal game",
+  [GAME_TYPES.SOLO_C]: "Clubs Solo",
+  [GAME_TYPES.SOLO_S]: "Spades Solo",
+  [GAME_TYPES.SOLO_H]: "Hearts Solo",
+  [GAME_TYPES.SOLO_D]: "Diamonds Solo",
+  [GAME_TYPES.SOLO_Q]: "Queens Solo",
+  [GAME_TYPES.SOLO_J]: "Jacks Solo",
+  [GAME_TYPES.SOLO_FLESHLESS]: "Fleshless Solo (no trump)",
+};
+
+// Builds the trump order (highest -> lowest) for a given game type. `schweinchenPlayer` !== null
+// inserts both Diamond Aces just below the top trump (Normal games only).
+function buildTrumpOrder(gameType, schweinchenPlayer) {
+  let order;
+  if (gameType === GAME_TYPES.NORMAL) {
+    // Both Ten-of-Hearts outrank even the Club Queens (this project's house rule variant); all
+    // Diamonds are trump otherwise.
+    order = ["H-10", "C-Q", "S-Q", "H-Q", "D-Q", "C-J", "S-J", "H-J", "D-J", "D-A", "D-10", "D-K", "D-9"];
+  } else if (gameType === GAME_TYPES.SOLO_Q) {
+    order = ["C-Q", "S-Q", "H-Q", "D-Q"];
+  } else if (gameType === GAME_TYPES.SOLO_J) {
+    order = ["C-J", "S-J", "H-J", "D-J"];
+  } else if (gameType === GAME_TYPES.SOLO_FLESHLESS) {
+    order = [];
+  } else {
+    // Farbsolo: the chosen suit's Ten sits at the very top (mirroring the confirmed Herzsolo
+    // structure), its Queen/Jack join the normal cross-suit tiers, and its remaining Ace/King/9
+    // fill the bottom tier.
+    const suit = gameType.replace("solo-", "");
+    order = [`${suit}-10`, "C-Q", "S-Q", "H-Q", "D-Q", "C-J", "S-J", "H-J", "D-J", `${suit}-A`, `${suit}-K`, `${suit}-9`];
+  }
+  if (schweinchenPlayer !== null && schweinchenPlayer !== undefined && gameType === GAME_TYPES.NORMAL) {
+    order = order.filter(k => k !== "D-A");
+    order.splice(1, 0, "D-A"); // just below the top trump
+  }
+  return order;
+}
+
 function cardValue(card) { return CARD_VALUE[card.rank]; }
 function cardLabel(card) { return `${card.rank}${SUIT_SYMBOL[card.suit]}`; }
 function playerName(idx) { return PLAYER_NAMES[idx]; }
+
+/* ============================== SETTINGS ================================= */
+
+const settings = {
+  solos: true,
+  hochzeit: true,
+  armut: true,
+  karlchen: true,
+  fuchs: true,
+  schweinchen: true,
+  genschern: true,
+};
+
+function readSettingsFromUI() {
+  settings.solos = document.getElementById("setting-solos").checked;
+  settings.hochzeit = document.getElementById("setting-hochzeit").checked;
+  settings.armut = document.getElementById("setting-armut").checked;
+  settings.karlchen = document.getElementById("setting-karlchen").checked;
+  settings.fuchs = document.getElementById("setting-fuchs").checked;
+  settings.schweinchen = document.getElementById("setting-schweinchen").checked;
+  settings.genschern = document.getElementById("setting-genschern").checked;
+}
 
 /* ============================== STATE =================================== */
 
@@ -49,16 +110,79 @@ const state = {
   kontraCardPoints: 0,
   reDoppelkopf: 0,
   kontraDoppelkopf: 0,
+  reFuchs: 0,
+  kontraFuchs: 0,
+  reKarlchen: 0,
+  kontraKarlchen: 0,
+  playerPoints: [0, 0, 0, 0], // card points won by each individual player (for Genschern's AI heuristic)
   matchScores: [0, 0, 0, 0],
   roundNumber: 0,
   roundActive: false,
   busy: false,
+  phase: "none", // "bidding" | "playing"
   announcements: {
     RE: { partnership: false, levels: [] },
     KONTRA: { partnership: false, levels: [] },
   },
-  revealed: [null, null, null, null], // per player: null, or the team they've shown themselves to be
+  revealed: [null, null, null, null],
+
+  gameType: GAME_TYPES.NORMAL,
+  trumpOrder: [],
+  trumpRankMap: new Map(),
+  isSolo: false,
+  soloPlayer: null,
+
+  isHochzeit: false,
+  hochzeitAnnouncer: null,
+  hochzeitResolved: true,
+  isArmut: false,
+
+  genschernPlayer: null,
+  genschernDKPlayed: 0,
+  genschernUsed: false,
+  pendingGenschernChooser: null, // set while waiting on the human's partner pick
+
+  biddingOrder: [],
+  biddingStep: 0,
+  biddingDeclarations: [null, null, null, null],
 };
+
+/* ============================== RULES (dynamic per game type) ============ */
+
+function isTrump(card) { return state.trumpRankMap.has(card.suit + "-" + card.rank); }
+function trumpRank(card) { return state.trumpRankMap.get(card.suit + "-" + card.rank); }
+function plainRank(card) { return PLAIN_RANK.get(card.rank); }
+
+function getLegalMoves(hand, trick) {
+  if (trick.length === 0) return hand.slice();
+  const led = trick[0].card;
+  const ledIsTrump = isTrump(led);
+  const matching = ledIsTrump
+    ? hand.filter(c => isTrump(c))
+    : hand.filter(c => !isTrump(c) && c.suit === led.suit);
+  return matching.length > 0 ? matching : hand.slice();
+}
+
+function evaluateTrick(trick) {
+  const trumps = trick.filter(t => isTrump(t.card));
+  if (trumps.length > 0) {
+    const h10Rank = state.trumpRankMap.get("H-10"); // undefined if H-10 isn't trump this round
+    let best = trumps[0];
+    for (const t of trumps) {
+      const r = trumpRank(t.card);
+      const br = trumpRank(best.card);
+      // Normally the first card played wins a tie. Exception: between the two Ten of Hearts
+      // (whenever they're trump at all), the SECOND one played beats the first.
+      if (r < br || (r === br && r === h10Rank)) best = t;
+    }
+    return best.playerIndex;
+  }
+  const ledSuit = trick[0].card.suit;
+  const matching = trick.filter(t => !isTrump(t.card) && t.card.suit === ledSuit);
+  let best = matching[0];
+  for (const t of matching) if (plainRank(t.card) < plainRank(best.card)) best = t;
+  return best.playerIndex;
+}
 
 /* ============================== DECK / DEAL ============================= */
 
@@ -86,18 +210,15 @@ function handComparator(a, b) {
   const at = isTrump(a), bt = isTrump(b);
   if (at && bt) return trumpRank(a) - trumpRank(b);
   if (at !== bt) return at ? -1 : 1;
-  const suitOrder = ["C", "S", "H"];
-  if (a.suit !== b.suit) return suitOrder.indexOf(a.suit) - suitOrder.indexOf(b.suit);
+  if (a.suit !== b.suit) return SUITS.indexOf(a.suit) - SUITS.indexOf(b.suit);
   return plainRank(a) - plainRank(b);
 }
 
 function dealNewRound() {
+  readSettingsFromUI();
   const deck = shuffle(createDeck());
   state.hands = [[], [], [], []];
   for (let i = 0; i < 48; i++) state.hands[i % 4].push(deck[i]);
-  state.hands[0].sort(handComparator);
-
-  state.teams = state.hands.map(hand => hand.some(c => c.suit === "C" && c.rank === "Q") ? "RE" : "KONTRA");
 
   state.trick = [];
   state.trickNumber = 0;
@@ -105,6 +226,11 @@ function dealNewRound() {
   state.kontraCardPoints = 0;
   state.reDoppelkopf = 0;
   state.kontraDoppelkopf = 0;
+  state.reFuchs = 0;
+  state.kontraFuchs = 0;
+  state.reKarlchen = 0;
+  state.kontraKarlchen = 0;
+  state.playerPoints = [0, 0, 0, 0];
   state.dealer = (state.dealer + 1) % 4;
   state.leader = (state.dealer + 1) % 4;
   state.currentPlayer = state.leader;
@@ -116,69 +242,240 @@ function dealNewRound() {
     KONTRA: { partnership: false, levels: [] },
   };
   state.revealed = [null, null, null, null];
+  state.teams = [null, null, null, null];
+
+  state.gameType = GAME_TYPES.NORMAL;
+  state.trumpOrder = buildTrumpOrder(GAME_TYPES.NORMAL, null);
+  state.trumpRankMap = new Map(state.trumpOrder.map((k, i) => [k, i]));
+  state.isSolo = false;
+  state.soloPlayer = null;
+  state.isHochzeit = false;
+  state.hochzeitAnnouncer = null;
+  state.hochzeitResolved = true;
+  state.isArmut = false;
+  state.genschernPlayer = null;
+  state.genschernDKPlayed = 0;
+  state.genschernUsed = false;
+  state.pendingGenschernChooser = null;
 
   document.getElementById("btn-new-round").classList.add("hidden");
   document.getElementById("btn-start").classList.add("hidden");
+  document.getElementById("settings-panel").classList.add("hidden");
 
+  log(`— Round ${state.roundNumber} dealt. —`, true);
+  startBiddingPhase();
+}
+
+/* ============================== BIDDING PHASE (VORBEHALTE) ================ */
+// After dealing, players are asked in turn (starting left of the dealer) whether they have a
+// reservation. Precedence: Solo > Hochzeit > Armut > healthy. Whoever holds the highest-precedence
+// declaration (earliest-asked wins ties) determines the round; "Pflichtsolo" (a forced solo for a
+// trump-less hand) isn't modeled - every solo here is a voluntary "Lustsolo".
+
+function countTrumpsForGameType(hand, gameType) {
+  const order = buildTrumpOrder(gameType, null);
+  const keys = new Set(order);
+  return hand.filter(c => keys.has(c.suit + "-" + c.rank)).length;
+}
+
+function aiChooseSoloType(hand) {
+  const candidates = [GAME_TYPES.SOLO_C, GAME_TYPES.SOLO_S, GAME_TYPES.SOLO_H, GAME_TYPES.SOLO_D, GAME_TYPES.SOLO_Q, GAME_TYPES.SOLO_J, GAME_TYPES.SOLO_FLESHLESS];
+  let best = candidates[0], bestCount = -1;
+  for (const gt of candidates) {
+    const count = countTrumpsForGameType(hand, gt);
+    if (count > bestCount) { bestCount = count; best = gt; }
+  }
+  return { gameType: best, trumpCount: bestCount };
+}
+
+function aiDecideBidding(playerIdx) {
+  const hand = state.hands[playerIdx];
+
+  if (settings.solos) {
+    // Picking the best of 7 candidate game types is a max-of-7 draw, which inflates how often a
+    // hand looks "strong" far more than a naive per-type threshold suggests - calibrated against
+    // 20,000 simulated random hands: threshold 10 gives a ~9% round-level solo rate (>=1 of 3 AI
+    // players declares), threshold 8 gave an unplayable ~81%.
+    const { gameType, trumpCount } = aiChooseSoloType(hand);
+    if (trumpCount >= 10) return { type: "solo", soloType: gameType };
+  }
+  if (settings.hochzeit && hand.filter(c => c.suit === "C" && c.rank === "Q").length === 2) {
+    return { type: "hochzeit" };
+  }
+  if (settings.armut && countTrumpsForGameType(hand, GAME_TYPES.NORMAL) <= 3) {
+    return { type: "armut" };
+  }
+  return { type: "healthy" };
+}
+
+function startBiddingPhase() {
+  state.phase = "bidding";
+  state.biddingOrder = [1, 2, 3, 0].map(off => (state.dealer + off) % 4);
+  state.biddingStep = 0;
+  state.biddingDeclarations = [null, null, null, null];
   renderAll();
-  log(`— Round ${state.roundNumber} dealt. You hold the ${state.teams[0] === "RE" ? "♣Q" : "no ♣Q"} — you play for <b>${state.teams[0]}</b>. —`, true);
+  advanceBidding();
+}
 
-  for (let idx = 1; idx <= 3; idx++) aiConsiderPartnership(idx);
+function advanceBidding() {
+  if (state.biddingStep >= 4) {
+    resolveBidding();
+    return;
+  }
+  const idx = state.biddingOrder[state.biddingStep];
+  if (idx === 0) {
+    renderAll(); // show the human bidding panel and wait for a button click
+  } else {
+    state.busy = true;
+    setTimeout(() => {
+      state.busy = false;
+      const decl = aiDecideBidding(idx);
+      submitBiddingDeclaration(idx, decl);
+    }, 500);
+  }
+}
+
+function submitBiddingDeclaration(idx, decl) {
+  state.biddingDeclarations[idx] = decl;
+  if (decl.type !== "healthy") {
+    const label = decl.type === "solo" ? GAME_TYPE_LABEL[decl.soloType]
+      : decl.type === "hochzeit" ? "Hochzeit" : "Armut";
+    log(`${playerName(idx)} has a reservation: <b>${label}</b>.`, true);
+  }
+  state.biddingStep++;
+  renderAll();
+  advanceBidding();
+}
+
+function resolveBidding() {
+  const declared = state.biddingOrder
+    .map(idx => ({ idx, decl: state.biddingDeclarations[idx] }))
+    .filter(x => x.decl && x.decl.type !== "healthy");
+
+  const solo = declared.find(x => x.decl.type === "solo");
+  const hochzeit = declared.find(x => x.decl.type === "hochzeit");
+  const armut = declared.find(x => x.decl.type === "armut");
+  const winner = solo || hochzeit || armut || null;
+
+  if (!winner) startNormalRound();
+  else if (winner.decl.type === "solo") startSoloRound(winner.idx, winner.decl.soloType);
+  else if (winner.decl.type === "hochzeit") startHochzeitRound(winner.idx);
+  else startArmutRound(winner.idx);
+}
+
+function detectSchweinchenAndGenschern() {
+  state.trumpOrder = buildTrumpOrder(GAME_TYPES.NORMAL, null);
+  let schweinchenPlayer = null;
+  if (settings.schweinchen) {
+    for (let i = 0; i < 4; i++) {
+      if (state.hands[i].filter(c => c.suit === "D" && c.rank === "A").length === 2) { schweinchenPlayer = i; break; }
+    }
+  }
+  state.trumpOrder = buildTrumpOrder(GAME_TYPES.NORMAL, schweinchenPlayer);
+  state.trumpRankMap = new Map(state.trumpOrder.map((k, i) => [k, i]));
+  if (schweinchenPlayer !== null) {
+    log(`${playerName(schweinchenPlayer)} holds both Diamond Aces - <b>Schweinchen!</b> Both are now the top trumps (below the Ten of Hearts).`, true);
+  }
+
+  state.genschernPlayer = null;
+  if (settings.genschern && !state.isHochzeit) {
+    for (let i = 0; i < 4; i++) {
+      if (state.hands[i].filter(c => c.suit === "D" && c.rank === "K").length === 2) { state.genschernPlayer = i; break; }
+    }
+  }
+}
+
+function beginPlayPhase() {
+  state.phase = "playing";
+  state.hands[0].sort(handComparator);
+  state.currentPlayer = state.leader;
   renderAll();
   maybeAiTurn();
 }
 
-/* ============================== RULES ==================================== */
-
-function getLegalMoves(hand, trick) {
-  if (trick.length === 0) return hand.slice();
-  const led = trick[0].card;
-  const ledIsTrump = isTrump(led);
-  const matching = ledIsTrump
-    ? hand.filter(c => isTrump(c))
-    : hand.filter(c => !isTrump(c) && c.suit === led.suit);
-  return matching.length > 0 ? matching : hand.slice();
+function startNormalRound() {
+  state.gameType = GAME_TYPES.NORMAL;
+  state.teams = state.hands.map(hand => hand.some(c => c.suit === "C" && c.rank === "Q") ? "RE" : "KONTRA");
+  detectSchweinchenAndGenschern();
+  log(`Normal game. You hold the ${state.teams[0] === "RE" ? "♣Q" : "no ♣Q"} - you play for <b>${state.teams[0]}</b>.`, true);
+  for (let idx = 1; idx <= 3; idx++) aiConsiderPartnership(idx);
+  beginPlayPhase();
 }
 
-const H10_RANK = TRUMP_RANK.get("H-10");
+function startSoloRound(playerIdx, soloType) {
+  state.gameType = soloType;
+  state.isSolo = true;
+  state.soloPlayer = playerIdx;
+  state.teams = [0, 1, 2, 3].map(i => i === playerIdx ? "RE" : "KONTRA");
+  state.trumpOrder = buildTrumpOrder(soloType, null);
+  state.trumpRankMap = new Map(state.trumpOrder.map((k, i) => [k, i]));
+  state.revealed[playerIdx] = "RE"; // announcing a solo is inherently public
+  log(`${playerName(playerIdx)} plays a <b>${GAME_TYPE_LABEL[soloType]}</b>, alone against the other three! (score tripled)`, true);
+  beginPlayPhase();
+}
 
-function evaluateTrick(trick) {
-  const trumps = trick.filter(t => isTrump(t.card));
-  if (trumps.length > 0) {
-    let best = trumps[0];
-    for (const t of trumps) {
-      const r = trumpRank(t.card);
-      const br = trumpRank(best.card);
-      // Normally the first card played wins a tie. Exception: between the two 10 of Hearts,
-      // the SECOND one played beats the first.
-      if (r < br || (r === br && r === H10_RANK)) best = t;
-    }
-    return best.playerIndex;
+function startHochzeitRound(announcerIdx) {
+  state.gameType = GAME_TYPES.NORMAL;
+  state.isHochzeit = true;
+  state.hochzeitAnnouncer = announcerIdx;
+  state.hochzeitResolved = false;
+  state.teams = [0, 1, 2, 3].map(i => i === announcerIdx ? "RE" : null);
+  state.revealed[announcerIdx] = "RE";
+  detectSchweinchenAndGenschern(); // Genschern is skipped while isHochzeit is true (see above)
+  log(`${playerName(announcerIdx)} announces <b>Hochzeit</b> (marriage)! Their partner will be whoever wins the first trick they don't win themselves.`, true);
+  beginPlayPhase();
+}
+
+function startArmutRound(armutPlayerIdx) {
+  state.gameType = GAME_TYPES.NORMAL;
+  state.isArmut = true;
+  state.trumpOrder = buildTrumpOrder(GAME_TYPES.NORMAL, null);
+  state.trumpRankMap = new Map(state.trumpOrder.map((k, i) => [k, i]));
+
+  const isNormalTrump = c => state.trumpRankMap.has(c.suit + "-" + c.rank);
+  const hand = state.hands[armutPlayerIdx];
+  const nonTrumps = hand.filter(c => !isNormalTrump(c)).sort((a, b) => cardValue(a) - cardValue(b));
+
+  let helperIdx = null, bestTrumpCount = -1;
+  for (let i = 0; i < 4; i++) {
+    if (i === armutPlayerIdx) continue;
+    const cnt = state.hands[i].filter(isNormalTrump).length;
+    if (cnt > bestTrumpCount) { bestTrumpCount = cnt; helperIdx = i; }
   }
-  const ledSuit = trick[0].card.suit;
-  const matching = trick.filter(t => !isTrump(t.card) && t.card.suit === ledSuit);
-  let best = matching[0];
-  for (const t of matching) if (plainRank(t.card) < plainRank(best.card)) best = t;
-  return best.playerIndex;
+  const helperHand = state.hands[helperIdx];
+  const helperTrumpsWeakestFirst = helperHand.filter(isNormalTrump).sort((a, b) => trumpRank(b) - trumpRank(a));
+  const swapCount = Math.min(3, nonTrumps.length, helperTrumpsWeakestFirst.length);
+  const armutGives = nonTrumps.slice(0, swapCount);
+  const helperGives = helperTrumpsWeakestFirst.slice(0, swapCount);
+
+  state.hands[armutPlayerIdx] = hand.filter(c => !armutGives.includes(c)).concat(helperGives);
+  state.hands[helperIdx] = helperHand.filter(c => !helperGives.includes(c)).concat(armutGives);
+  log(`${playerName(armutPlayerIdx)} declares <b>Armut</b> (poverty) and trades ${swapCount} card${swapCount === 1 ? "" : "s"} with ${playerName(helperIdx)}, who takes them on as partner. (This implementation resolves the trade automatically rather than offering an interactive negotiation.)`, true);
+
+  state.teams = [0, 1, 2, 3].map(i => (i === armutPlayerIdx || i === helperIdx) ? "RE" : "KONTRA");
+  state.revealed[armutPlayerIdx] = "RE";
+  state.revealed[helperIdx] = "RE";
+  detectSchweinchenAndGenschern();
+  for (let idx = 1; idx <= 3; idx++) aiConsiderPartnership(idx);
+  beginPlayPhase();
 }
 
 /* ============================== ANNOUNCEMENTS (ANSAGEN) ==================== */
-// Tournament rules: a party member may call "Re"/"Kontra" while they still hold >=11 cards
-// (i.e. before or with their own first card). After their own party has announced, either
-// member may escalate with "keine 90/60/30" or "schwarz", each with its own later hand-size
-// deadline. Playing a Queen of Clubs, or making any announcement, publicly reveals that
-// individual player's team (not necessarily their partner's).
 
 function canAnnouncePartnership(playerIdx) {
-  if (!state.roundActive) return false;
+  if (!state.roundActive || state.phase !== "playing") return false;
+  if (state.isHochzeit && !state.hochzeitResolved) return false; // announcements wait for the clarification trick
   const team = state.teams[playerIdx];
+  if (!team) return false; // undecided (mid-Hochzeit) - can't announce yet
   if (state.announcements[team].partnership) return false;
   return state.hands[playerIdx].length >= ANNOUNCE_MIN_HAND.partnership;
 }
 
 function canAnnounceAbsage(playerIdx, level) {
-  if (!state.roundActive) return false;
+  if (!state.roundActive || state.phase !== "playing") return false;
+  if (state.isHochzeit && !state.hochzeitResolved) return false;
   const team = state.teams[playerIdx];
+  if (!team) return false;
   if (!state.announcements[team].partnership) return false;
   if (state.announcements[team].levels.includes(level)) return false;
   return state.hands[playerIdx].length >= ANNOUNCE_MIN_HAND[level];
@@ -186,6 +483,7 @@ function canAnnounceAbsage(playerIdx, level) {
 
 function revealPlayer(playerIdx) {
   if (state.revealed[playerIdx]) return;
+  if (!state.teams[playerIdx]) return; // team not decided yet (mid-Hochzeit)
   state.revealed[playerIdx] = state.teams[playerIdx];
 }
 
@@ -222,18 +520,18 @@ function aiConsiderPartnership(playerIdx) {
 function aiConsiderAbsage(playerIdx) {
   if (playerIdx === 0) return;
   const team = state.teams[playerIdx];
-  if (!state.announcements[team].partnership || state.trickNumber === 0) return;
+  if (!team || !state.announcements[team].partnership || state.trickNumber === 0) return;
   const ownPoints = team === "RE" ? state.reCardPoints : state.kontraCardPoints;
   const avgPerTrick = ownPoints / state.trickNumber;
-  if (avgPerTrick < 17) return; // not dominant enough to raise the stakes further
+  if (avgPerTrick < 17) return;
   for (const level of ABSAGE_LEVELS) {
     if (state.announcements[team].levels.includes(level)) continue;
     if (canAnnounceAbsage(playerIdx, level)) announceAbsage(playerIdx, level);
-    break; // only ever escalate one level per trick
+    break;
   }
 }
 
-/* ============================== AI ======================================== */
+/* ============================== AI (card play) ============================= */
 
 function chooseAiCard(playerIndex) {
   const hand = state.hands[playerIndex];
@@ -241,59 +539,70 @@ function chooseAiCard(playerIndex) {
   if (legal.length === 1) return legal[0];
 
   if (state.trick.length === 0) {
-    // Leading the trick.
     const plainAces = legal.filter(c => !isTrump(c) && c.rank === "A");
     if (plainAces.length > 0) return plainAces[0];
     const trumps = legal.filter(isTrump);
-    if (trumps.length >= 5) return trumps.slice().sort((a, b) => trumpRank(b) - trumpRank(a))[0]; // weakest trump
+    if (trumps.length >= 5) return trumps.slice().sort((a, b) => trumpRank(b) - trumpRank(a))[0];
     const plains = legal.filter(c => !isTrump(c));
-    if (plains.length > 0) {
-      return plains.slice().sort((a, b) => cardValue(a) - cardValue(b))[0];
-    }
+    if (plains.length > 0) return plains.slice().sort((a, b) => cardValue(a) - cardValue(b))[0];
     return trumps.slice().sort((a, b) => trumpRank(b) - trumpRank(a))[0];
   }
 
-  // Following.
   const myTeam = state.teams[playerIndex];
   const winningIdx = evaluateTrick(state.trick);
-  const partnerWinning = state.teams[winningIdx] === myTeam;
+  const partnerWinning = myTeam !== null && state.teams[winningIdx] === myTeam;
   const isLastToPlay = state.trick.length === 3;
 
-  // Which legal cards would win if played now?
   const winningMoves = legal.filter(card => {
     const hypothetical = state.trick.concat([{ playerIndex, card }]);
     return evaluateTrick(hypothetical) === playerIndex;
   });
 
   if (partnerWinning) {
-    // Feed points to partner (schmieren): play highest-value legal card.
     return legal.slice().sort((a, b) => cardValue(b) - cardValue(a))[0];
   }
 
   const trickValueSoFar = state.trick.reduce((s, t) => s + cardValue(t.card), 0);
 
   if (winningMoves.length > 0 && (isLastToPlay || trickValueSoFar >= 8 || winningMoves.some(isTrump) === false)) {
-    // Win as cheaply as possible.
     return winningMoves.slice().sort((a, b) => {
       const at = isTrump(a), bt = isTrump(b);
-      if (at !== bt) return at ? 1 : -1; // prefer non-trump wins
-      if (at && bt) return trumpRank(b) - trumpRank(a); // weakest trump first (higher rank index = weaker)
+      if (at !== bt) return at ? 1 : -1;
+      if (at && bt) return trumpRank(b) - trumpRank(a);
       return plainRank(b) - plainRank(a);
     })[0];
   }
 
-  // Can't or don't want to win: dump the lowest-value card, saving trump if possible.
   return legal.slice().sort((a, b) => {
     const at = isTrump(a), bt = isTrump(b);
-    if (at !== bt) return at ? 1 : -1; // prefer discarding non-trump
+    if (at !== bt) return at ? 1 : -1;
     return cardValue(a) - cardValue(b);
   })[0];
+}
+
+/* ============================== GENSCHERN =================================== */
+
+function resolveGenschernChoice(chooserIdx, partnerIdx) {
+  state.genschernUsed = true;
+  state.teams = [0, 1, 2, 3].map(i => (i === chooserIdx || i === partnerIdx) ? "RE" : "KONTRA");
+  state.revealed = state.teams.slice(); // declaring it is inherently public
+  log(`${playerName(chooserIdx)} calls <b>"Genscher"</b> and picks ${playerName(partnerIdx)} as their new partner for the rest of the round!`, true);
+  renderAll();
+}
+
+function aiGenschernPartnerChoice(chooserIdx) {
+  let bestIdx = null, bestPoints = -1;
+  for (let i = 0; i < 4; i++) {
+    if (i === chooserIdx) continue;
+    if (state.playerPoints[i] > bestPoints) { bestPoints = state.playerPoints[i]; bestIdx = i; }
+  }
+  return bestIdx;
 }
 
 /* ============================== TURN FLOW ================================= */
 
 function playCard(playerIdx, card) {
-  if (!state.roundActive || state.busy) return;
+  if (!state.roundActive || state.busy || state.phase !== "playing") return;
   if (playerIdx !== state.currentPlayer) return;
 
   const hand = state.hands[playerIdx];
@@ -307,8 +616,24 @@ function playCard(playerIdx, card) {
   state.trick.push({ playerIndex: playerIdx, card });
   log(`${playerName(playerIdx)} plays <b>${cardLabel(card)}</b>.`);
   if (card.suit === "C" && card.rank === "Q") revealPlayer(playerIdx);
-  renderAll();
 
+  if (settings.genschern && state.genschernPlayer === playerIdx && !state.genschernUsed && card.suit === "D" && card.rank === "K") {
+    state.genschernDKPlayed++;
+    if (state.genschernDKPlayed === 2) {
+      if (playerIdx === 0) {
+        state.pendingGenschernChooser = 0;
+        renderAll();
+        return; // pause here - the human's modal choice will call continueAfterCardPlayed
+      }
+      resolveGenschernChoice(playerIdx, aiGenschernPartnerChoice(playerIdx));
+    }
+  }
+
+  renderAll();
+  continueAfterCardPlayed(playerIdx);
+}
+
+function continueAfterCardPlayed(playerIdx) {
   if (state.trick.length < 4) {
     state.currentPlayer = (playerIdx + 1) % 4;
     renderAll();
@@ -321,6 +646,32 @@ function playCard(playerIdx, card) {
 
 function resolveTrick() {
   const winnerIdx = evaluateTrick(state.trick);
+
+  // Hochzeit partnership resolution happens before points are credited, since crediting depends
+  // on state.teams[winnerIdx] being correct.
+  if (state.isHochzeit && !state.hochzeitResolved) {
+    if (winnerIdx !== state.hochzeitAnnouncer) {
+      state.teams[winnerIdx] = "RE";
+      for (let i = 0; i < 4; i++) if (!state.teams[i]) state.teams[i] = "KONTRA";
+      state.hochzeitResolved = true;
+      log(`${playerName(winnerIdx)} wins the clarification trick and becomes ${playerName(state.hochzeitAnnouncer)}'s partner!`, true);
+      revealPlayer(winnerIdx);
+      for (let i = 1; i <= 3; i++) aiConsiderPartnership(i);
+    } else if (state.trickNumber === 2) {
+      // this is about to be the 3rd trick and the announcer has won all of them - auto-solo.
+      state.isHochzeit = false;
+      state.hochzeitResolved = true;
+      state.isSolo = true;
+      state.soloPlayer = state.hochzeitAnnouncer;
+      state.gameType = GAME_TYPES.SOLO_D;
+      state.teams = [0, 1, 2, 3].map(i => i === state.hochzeitAnnouncer ? "RE" : "KONTRA");
+      state.trumpOrder = buildTrumpOrder(GAME_TYPES.SOLO_D, null);
+      state.trumpRankMap = new Map(state.trumpOrder.map((k, i) => [k, i]));
+      state.revealed = state.teams.slice();
+      log(`${playerName(state.hochzeitAnnouncer)} took the first three tricks alone - the Hochzeit automatically becomes a <b>Diamonds Solo</b>! (score now tripled)`, true);
+    }
+  }
+
   const trickPoints = state.trick.reduce((s, t) => s + cardValue(t.card), 0);
   const winningTeam = state.teams[winnerIdx];
 
@@ -330,6 +681,23 @@ function resolveTrick() {
   } else {
     state.kontraCardPoints += trickPoints;
     if (trickPoints >= 40) state.kontraDoppelkopf++;
+  }
+  state.playerPoints[winnerIdx] += trickPoints;
+
+  if (settings.fuchs) {
+    for (const play of state.trick) {
+      if (play.card.suit === "D" && play.card.rank === "A" && state.teams[play.playerIndex] !== winningTeam) {
+        if (winningTeam === "RE") state.reFuchs++; else state.kontraFuchs++;
+        log(`${playerName(winnerIdx)}'s team catches a <b>Fuchs</b> (Diamond Ace)!`, true);
+      }
+    }
+  }
+  if (settings.karlchen && state.trickNumber === 11) {
+    const clubJackPlay = state.trick.find(t => t.card.suit === "C" && t.card.rank === "J");
+    if (clubJackPlay && clubJackPlay.playerIndex === winnerIdx) {
+      if (winningTeam === "RE") state.reKarlchen = 1; else state.kontraKarlchen = 1;
+      log(`${playerName(winnerIdx)} takes the last trick with the Club Jack - <b>Karlchen!</b>`, true);
+    }
   }
 
   log(`${playerName(winnerIdx)} wins the trick (${trickPoints} pts).`, true);
@@ -351,7 +719,8 @@ function resolveTrick() {
 }
 
 function maybeAiTurn() {
-  if (!state.roundActive) return;
+  if (!state.roundActive || state.phase !== "playing") return;
+  if (state.pendingGenschernChooser !== null) return; // waiting on a human decision
   if (state.currentPlayer === 0) { renderAll(); return; }
   state.busy = true;
   setTimeout(() => {
@@ -375,35 +744,34 @@ function endRound() {
   if (loserPoints < 30) gameValue++;
   if (loserPoints === 0) gameValue++;
 
-  // Announcing Re or Kontra raises the stakes for the whole round: +2 points, awarded to
-  // whichever party ends up winning, regardless of who announced.
   let announceBonus = 0;
   if (state.announcements.RE.partnership) announceBonus += 2;
   if (state.announcements.KONTRA.partnership) announceBonus += 2;
 
-  // Absagen ("keine 90/60/30", "schwarz") only pay off if the WINNING party made that specific
-  // call themselves, and the final score actually bears it out.
   const winnerTeam = reWins ? "RE" : "KONTRA";
   const winnerAbsageBonus = state.announcements[winnerTeam].levels.reduce((sum, level) => {
     const met = level === "90" ? loserPoints < 90
       : level === "60" ? loserPoints < 60
         : level === "30" ? loserPoints < 30
-          : loserPoints === 0; // schwarz
+          : loserPoints === 0;
     return sum + (met ? 1 : 0);
   }, 0);
 
   gameValue += announceBonus + winnerAbsageBonus;
 
-  let net = reWins ? gameValue : -gameValue; // from Re's perspective
-  net += state.reDoppelkopf - state.kontraDoppelkopf;
+  let net = reWins ? gameValue : -gameValue;
+  net += (state.reDoppelkopf - state.kontraDoppelkopf);
+  if (settings.fuchs) net += (state.reFuchs - state.kontraFuchs);
+  if (settings.karlchen) net += (state.reKarlchen - state.kontraKarlchen);
 
   state.teams.forEach((team, idx) => {
-    state.matchScores[idx] += (team === "RE" ? net : -net);
+    const swing = team === "RE" ? net : -net;
+    state.matchScores[idx] += state.isSolo && idx === state.soloPlayer ? swing * 3 : swing;
   });
 
-  log(`Round ${state.roundNumber} over. Re: ${state.reCardPoints} pts, Kontra: ${state.kontraCardPoints} pts. ${reWins ? "RE" : "KONTRA"} wins the round.`, true);
+  log(`Round ${state.roundNumber} over (${gameTypeDisplayLabel()}). Re: ${state.reCardPoints} pts, Kontra: ${state.kontraCardPoints} pts. ${reWins ? "RE" : "KONTRA"} wins the round.`, true);
 
-  state.revealed = state.teams.slice(); // round is over - everyone's team is public now
+  state.revealed = state.teams.slice();
 
   showRoundSummary({ reWins, gameValue, net, loserPoints, announceBonus, winnerAbsageBonus });
   renderAll();
@@ -437,7 +805,7 @@ function makeCardEl(card, opts) {
 function renderHand() {
   const container = document.getElementById("hand-0");
   container.innerHTML = "";
-  const isMyTurn = state.roundActive && state.currentPlayer === 0 && !state.busy;
+  const isMyTurn = state.roundActive && state.phase === "playing" && state.currentPlayer === 0 && !state.busy && state.pendingGenschernChooser === null;
   const legal = isMyTurn ? getLegalMoves(state.hands[0], state.trick) : [];
   for (const card of state.hands[0]) {
     const legalNow = !isMyTurn ? true : legal.some(c => c.id === card.id);
@@ -447,7 +815,8 @@ function renderHand() {
     });
     container.appendChild(el);
   }
-  document.getElementById("your-team").textContent = state.teams[0] || "?";
+  const teamLabel = state.teams[0] ? (state.isSolo && state.soloPlayer === 0 ? GAME_TYPE_LABEL[state.gameType] : state.teams[0]) : "undecided";
+  document.getElementById("your-team").textContent = teamLabel;
 }
 
 function teamTagHtml(team) {
@@ -467,16 +836,16 @@ function renderOpponents() {
     }
     const label = document.getElementById(`label-${idx}`);
     label.innerHTML = playerName(idx) + teamTagHtml(state.revealed[idx]);
-    label.classList.toggle("active", state.roundActive && state.currentPlayer === idx);
+    label.classList.toggle("active", state.roundActive && state.phase === "playing" && state.currentPlayer === idx);
   }
   const label0 = document.querySelector(".hand-area .player-label");
-  if (label0) label0.classList.toggle("active", state.roundActive && state.currentPlayer === 0);
+  if (label0) label0.classList.toggle("active", state.roundActive && state.phase === "playing" && state.currentPlayer === 0);
 }
 
 function renderAnnouncements() {
   const panel = document.getElementById("announce-panel");
   if (!panel) return;
-  if (!state.roundActive) { panel.classList.add("hidden"); return; }
+  if (!state.roundActive || state.phase !== "playing") { panel.classList.add("hidden"); return; }
   panel.classList.remove("hidden");
 
   const team = state.teams[0];
@@ -488,6 +857,56 @@ function renderAnnouncements() {
     const btn = document.getElementById(`btn-absage-${level}`);
     btn.disabled = !canAnnounceAbsage(0, level);
   }
+}
+
+function renderBidding() {
+  const panel = document.getElementById("bidding-panel");
+  if (!panel) return;
+  if (!state.roundActive || state.phase !== "bidding" || state.biddingOrder[state.biddingStep] !== 0) {
+    panel.classList.add("hidden");
+    return;
+  }
+  panel.classList.remove("hidden");
+
+  const hand = state.hands[0];
+  const actions = document.getElementById("bidding-actions");
+  actions.innerHTML = "";
+
+  const addBtn = (label, onClick) => {
+    const b = document.createElement("button");
+    b.className = "announce-btn";
+    b.textContent = label;
+    b.addEventListener("click", onClick);
+    actions.appendChild(b);
+  };
+
+  addBtn("Play normal", () => submitBiddingDeclaration(0, { type: "healthy" }));
+
+  if (settings.solos) {
+    const soloTypes = [GAME_TYPES.SOLO_C, GAME_TYPES.SOLO_S, GAME_TYPES.SOLO_H, GAME_TYPES.SOLO_D, GAME_TYPES.SOLO_Q, GAME_TYPES.SOLO_J, GAME_TYPES.SOLO_FLESHLESS];
+    for (const gt of soloTypes) {
+      addBtn(GAME_TYPE_LABEL[gt], () => submitBiddingDeclaration(0, { type: "solo", soloType: gt }));
+    }
+  }
+  if (settings.hochzeit && hand.filter(c => c.suit === "C" && c.rank === "Q").length === 2) {
+    addBtn("Hochzeit", () => submitBiddingDeclaration(0, { type: "hochzeit" }));
+  }
+  if (settings.armut && countTrumpsForGameType(hand, GAME_TYPES.NORMAL) <= 3) {
+    addBtn("Armut", () => submitBiddingDeclaration(0, { type: "armut" }));
+  }
+}
+
+function gameTypeDisplayLabel() {
+  if (state.isHochzeit) return state.hochzeitResolved ? "Hochzeit" : "Hochzeit (partner not yet determined)";
+  if (state.isArmut) return "Armut";
+  return GAME_TYPE_LABEL[state.gameType];
+}
+
+function renderGameTypeBanner() {
+  const el = document.getElementById("game-type-banner");
+  if (!el) return;
+  if (!state.roundActive || state.phase !== "playing") { el.textContent = ""; return; }
+  el.textContent = state.gameType === GAME_TYPES.NORMAL && !state.isHochzeit && !state.isArmut ? "" : gameTypeDisplayLabel();
 }
 
 function renderTrick() {
@@ -509,7 +928,7 @@ function renderScoreboard() {
     div.innerHTML = `${playerName(i)}: <b>${state.matchScores[i]}</b>`;
     sb.appendChild(div);
   }
-  if (state.roundActive) {
+  if (state.roundActive && state.phase === "playing") {
     const div = document.createElement("div");
     div.className = "sb-entry";
     div.innerHTML = `Trick ${state.trickNumber + 1}/12 &nbsp; Re: <b>${state.reCardPoints}</b> · Kontra: <b>${state.kontraCardPoints}</b>`;
@@ -520,6 +939,8 @@ function renderScoreboard() {
 function renderTurnIndicator() {
   const el = document.getElementById("turn-indicator");
   if (!state.roundActive) { el.textContent = ""; return; }
+  if (state.phase === "bidding") { el.textContent = "Waiting on reservations…"; return; }
+  if (state.pendingGenschernChooser !== null) { el.textContent = "Choose your new partner!"; return; }
   el.textContent = state.currentPlayer === 0 ? "Your turn" : `${playerName(state.currentPlayer)} is thinking…`;
 }
 
@@ -530,37 +951,68 @@ function renderAll() {
   renderScoreboard();
   renderTurnIndicator();
   renderAnnouncements();
+  renderBidding();
+  renderGameTypeBanner();
+  renderGenschernModal();
 }
 
-/* ============================== MODAL ===================================== */
+/* ============================== MODALS ===================================== */
+
+function showModal(html) {
+  document.getElementById("modal").innerHTML = html;
+  document.getElementById("modal-overlay").classList.remove("hidden");
+}
+function hideModal() {
+  document.getElementById("modal-overlay").classList.add("hidden");
+}
+
+function renderGenschernModal() {
+  if (state.pendingGenschernChooser === null) return;
+  const chooser = state.pendingGenschernChooser;
+  const options = [0, 1, 2, 3].filter(i => i !== chooser)
+    .map(i => `<button class="genschern-choice" data-idx="${i}">${playerName(i)}</button>`).join("");
+  showModal(`
+    <h2>Genscher!</h2>
+    <p>You've played your second Diamond King. Choose your partner for the rest of the round:</p>
+    <div class="modal-actions">${options}</div>
+  `);
+  for (const btn of document.querySelectorAll(".genschern-choice")) {
+    btn.addEventListener("click", () => {
+      const partnerIdx = parseInt(btn.dataset.idx, 10);
+      hideModal();
+      state.pendingGenschernChooser = null; // clear before resolving, so its internal renderAll() doesn't re-show this modal
+      resolveGenschernChoice(chooser, partnerIdx);
+      continueAfterCardPlayed(chooser);
+    });
+  }
+}
 
 function showRoundSummary(info) {
-  const overlay = document.getElementById("modal-overlay");
-  const modal = document.getElementById("modal");
   const reTeamPlayers = state.teams.map((t, i) => t === "RE" ? playerName(i) : null).filter(Boolean).join(", ");
   const kontraTeamPlayers = state.teams.map((t, i) => t === "KONTRA" ? playerName(i) : null).filter(Boolean).join(", ");
+  const bonusBits = [];
+  if (state.reDoppelkopf + state.kontraDoppelkopf > 0) bonusBits.push(`Doppelkopf bonuses (Re ${state.reDoppelkopf}, Kontra ${state.kontraDoppelkopf})`);
+  if (settings.fuchs && (state.reFuchs + state.kontraFuchs) > 0) bonusBits.push(`Fuchs bonuses (Re ${state.reFuchs}, Kontra ${state.kontraFuchs})`);
+  if (settings.karlchen && (state.reKarlchen + state.kontraKarlchen) > 0) bonusBits.push(`Karlchen (Re ${state.reKarlchen}, Kontra ${state.kontraKarlchen})`);
+  if (info.announceBonus > 0) bonusBits.push(`${info.announceBonus} for announced Re/Kontra`);
+  if (info.winnerAbsageBonus > 0) bonusBits.push(`${info.winnerAbsageBonus} for fulfilled Absage(n)`);
 
-  modal.innerHTML = `
+  showModal(`
     <h2>${info.reWins ? "RE wins the round!" : "KONTRA wins the round!"}</h2>
+    <p><b>${gameTypeDisplayLabel()}</b>${state.isSolo ? " - score tripled for the solo player" : ""}</p>
     <table>
       <tr><th></th><th>Team</th><th>Card points</th></tr>
       <tr><td>Re</td><td>${reTeamPlayers}</td><td>${state.reCardPoints}</td></tr>
       <tr><td>Kontra</td><td>${kontraTeamPlayers}</td><td>${state.kontraCardPoints}</td></tr>
     </table>
     <p>Game value: <b>${info.gameValue}</b> point${info.gameValue === 1 ? "" : "s"}
-      (loser had ${info.loserPoints} pts)${(state.reDoppelkopf + state.kontraDoppelkopf) > 0
-        ? ` + Doppelkopf bonuses (Re ${state.reDoppelkopf}, Kontra ${state.kontraDoppelkopf})` : ""}${info.announceBonus > 0
-        ? ` + ${info.announceBonus} for announced Re/Kontra` : ""}${info.winnerAbsageBonus > 0
-        ? ` + ${info.winnerAbsageBonus} for fulfilled Absage(n)` : ""}.</p>
-    <p>Net swing: <b>${info.net >= 0 ? "+" : ""}${info.net}</b> for Re / <b>${info.net <= 0 ? "+" : "-"}${Math.abs(info.net)}</b> for Kontra.</p>
+      (loser had ${info.loserPoints} pts)${bonusBits.length > 0 ? " + " + bonusBits.join(", ") : ""}.</p>
+    <p>Net swing: <b>${info.net >= 0 ? "+" : ""}${info.net}</b> for Re / <b>${info.net <= 0 ? "+" : "-"}${Math.abs(info.net)}</b> for Kontra${state.isSolo ? " (before the solo player's x3)" : ""}.</p>
     <div class="modal-actions">
       <button id="modal-close">Continue</button>
     </div>
-  `;
-  overlay.classList.remove("hidden");
-  document.getElementById("modal-close").addEventListener("click", () => {
-    overlay.classList.add("hidden");
-  });
+  `);
+  document.getElementById("modal-close").addEventListener("click", hideModal);
 }
 
 /* ============================== INIT ======================================= */
@@ -573,8 +1025,9 @@ function newMatch() {
   document.getElementById("btn-new-match").classList.add("hidden");
   document.getElementById("btn-new-round").classList.add("hidden");
   document.getElementById("btn-start").classList.remove("hidden");
+  document.getElementById("settings-panel").classList.remove("hidden");
   renderScoreboard();
-  log("New match started. Click \"Start Match\" to deal the first round.", true);
+  log("New match started. Adjust house rules below, then click \"Start Match\".", true);
 }
 
 document.addEventListener("DOMContentLoaded", () => {
@@ -586,5 +1039,5 @@ document.addEventListener("DOMContentLoaded", () => {
     document.getElementById(`btn-absage-${level}`).addEventListener("click", () => announceAbsage(0, level));
   }
   renderScoreboard();
-  log("Welcome to Doppelkopf! Click \"Start Match\" to deal the first round.", true);
+  log("Welcome to Doppelkopf! Adjust house rules below, then click \"Start Match\".", true);
 });

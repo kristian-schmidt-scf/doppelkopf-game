@@ -4,6 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Doppelkopf</title>
+<link rel="icon" type="image/svg+xml" href="favicon.svg">
 <link rel="stylesheet" href="style.css">
 </head>
 <body>
@@ -35,8 +36,25 @@
       <strong>"keine 30"</strong> (8+), or <strong>"schwarz"</strong> (7+) — each predicting the opponents won't
       reach that many points. A fulfilled Absage earns the winning party +1 extra, but only if they were the ones
       who called it. Announcing (or playing a ♣Q) reveals that individual player's team.</p>
-      <p><em>Note: this implementation plays standard rounds only — solos and marriages ("Hochzeit") are not
-      included.</em></p>
+      <p><strong>House rules (all toggleable before a match):</strong></p>
+      <ul>
+        <li><strong>Solos</strong> — during the reservation round after dealing, a player may go alone against
+        the other three for triple stakes: a Farbsolo (one suit is the sole trump), Damen-/Bubensolo (only
+        Queens/Jacks are trump), or a trump-free Fleshless Solo.</li>
+        <li><strong>Hochzeit</strong> (marriage) — the holder of both ♣Q may seek a partner instead: whoever
+        wins the first trick the announcer doesn't win themselves becomes their partner. Winning all of the
+        first three tricks alone auto-converts the round into a Diamonds Solo.</li>
+        <li><strong>Armut</strong> (poverty) — a player with 3 or fewer trumps may declare it; this
+        implementation resolves the card trade with a helper automatically rather than offering an interactive
+        negotiation.</li>
+        <li><strong>Karlchen</strong> — +1 bonus point if the ♣J wins the last trick.</li>
+        <li><strong>Fuchs</strong> — +1 bonus point for catching an opponent's ♦A (winning a trick that
+        contains a Diamond Ace played by the other side).</li>
+        <li><strong>Schweinchen</strong> — whoever is dealt both ♦A has them promoted to the two highest
+        trumps (just below the ♥10) for the round.</li>
+        <li><strong>Genschern</strong> — whoever is dealt both ♦K may, upon playing the second one, publicly
+        pick any other player as their partner for the rest of the round.</li>
+      </ul>
     </div>
   </details>
 </header>
@@ -57,6 +75,7 @@
     </div>
     <div class="trick-area" id="trick-area"></div>
     <div class="turn-indicator" id="turn-indicator"></div>
+    <div class="game-type-banner" id="game-type-banner"></div>
   </div>
 </main>
 
@@ -71,6 +90,22 @@
     <button id="btn-absage-60" class="announce-btn">Keine 60</button>
     <button id="btn-absage-30" class="announce-btn">Keine 30</button>
     <button id="btn-absage-schwarz" class="announce-btn">Schwarz</button>
+  </div>
+
+  <div class="bidding-panel hidden" id="bidding-panel">
+    <span class="announce-label">Reservation? (Vorbehalt)</span>
+    <div class="bidding-actions" id="bidding-actions"></div>
+  </div>
+
+  <div class="settings-panel" id="settings-panel">
+    <span class="announce-label">House rules for this match:</span>
+    <label><input type="checkbox" id="setting-solos" checked> Solos</label>
+    <label><input type="checkbox" id="setting-hochzeit" checked> Hochzeit</label>
+    <label><input type="checkbox" id="setting-armut" checked> Armut</label>
+    <label><input type="checkbox" id="setting-karlchen" checked> Karlchen</label>
+    <label><input type="checkbox" id="setting-fuchs" checked> Fuchs</label>
+    <label><input type="checkbox" id="setting-schweinchen" checked> Schweinchen</label>
+    <label><input type="checkbox" id="setting-genschern" checked> Genschern</label>
   </div>
 
   <div class="controls">
