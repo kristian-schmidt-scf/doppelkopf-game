@@ -28,8 +28,15 @@
       <p><strong>Scoring bonuses:</strong> +1 if the losing side scores under 90, +1 more under 60, +1 more under 30,
       +1 more if they score 0 ("schwarz"). +1 "Doppelkopf" bonus for each trick worth 40+ points, credited to
       whichever team won it.</p>
-      <p><em>Note: this implementation plays standard rounds only — solos, marriages ("Hochzeit") and
-      announcements ("Re"/"Kontra") are not included.</em></p>
+      <p><strong>Announcements (Ansagen):</strong> A player may call <strong>"Re"</strong> or <strong>"Kontra"</strong>
+      for their own party while still holding 11+ cards (i.e. up to their own first card). This raises the round's
+      stakes by 2 points, awarded to whichever party ends up winning. Once their party has announced, either member
+      may then escalate with <strong>"keine 90"</strong> (10+ cards left), <strong>"keine 60"</strong> (9+),
+      <strong>"keine 30"</strong> (8+), or <strong>"schwarz"</strong> (7+) — each predicting the opponents won't
+      reach that many points. A fulfilled Absage earns the winning party +1 extra, but only if they were the ones
+      who called it. Announcing (or playing a ♣Q) reveals that individual player's team.</p>
+      <p><em>Note: this implementation plays standard rounds only — solos and marriages ("Hochzeit") are not
+      included.</em></p>
     </div>
   </details>
 </header>
@@ -37,15 +44,15 @@
 <main>
   <div class="table">
     <div class="seat seat-top">
-      <div class="player-label" id="label-2">CPU North</div>
+      <div class="player-label" id="label-2">Gisela</div>
       <div class="hand-back" id="hand-2"></div>
     </div>
     <div class="seat seat-left">
-      <div class="player-label" id="label-1">CPU West</div>
+      <div class="player-label" id="label-1">Herbert</div>
       <div class="hand-back" id="hand-1"></div>
     </div>
     <div class="seat seat-right">
-      <div class="player-label" id="label-3">CPU East</div>
+      <div class="player-label" id="label-3">Dieter</div>
       <div class="hand-back" id="hand-3"></div>
     </div>
     <div class="trick-area" id="trick-area"></div>
@@ -56,6 +63,16 @@
 <section class="hand-area">
   <div class="player-label">Your hand — Team: <span id="your-team">?</span></div>
   <div class="hand" id="hand-0"></div>
+
+  <div class="announce-panel hidden" id="announce-panel">
+    <span class="announce-label">Ansagen:</span>
+    <button id="btn-announce-partnership" class="announce-btn">Announce</button>
+    <button id="btn-absage-90" class="announce-btn">Keine 90</button>
+    <button id="btn-absage-60" class="announce-btn">Keine 60</button>
+    <button id="btn-absage-30" class="announce-btn">Keine 30</button>
+    <button id="btn-absage-schwarz" class="announce-btn">Schwarz</button>
+  </div>
+
   <div class="controls">
     <button id="btn-start">Start Match</button>
     <button id="btn-new-round" class="hidden">Deal Next Round</button>

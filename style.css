@@ -94,7 +94,19 @@ main {
   text-shadow: 0 1px 2px #000;
 }
 .player-label.active { color: #fff; text-shadow: 0 0 8px var(--accent); }
-.player-label .team-tag { font-size: 11px; color: var(--accent); margin-left: 4px; }
+
+.team-tag {
+  display: inline-block;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.5px;
+  padding: 1px 6px;
+  border-radius: 8px;
+  text-shadow: none;
+  vertical-align: middle;
+}
+.team-tag.re { background: #b3261e; color: #fff; }
+.team-tag.kontra { background: #1e5fb3; color: #fff; }
 
 .hand-back {
   display: flex;
@@ -153,6 +165,27 @@ main {
   min-height: var(--card-h);
   padding: 6px 0;
 }
+
+.announce-panel {
+  margin-top: 10px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.announce-label { font-size: 12px; color: #999; margin-right: 2px; }
+.announce-btn {
+  background: transparent;
+  color: var(--accent);
+  border: 1px solid var(--accent);
+  padding: 5px 12px;
+  border-radius: 14px;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+}
+.announce-btn:hover:not(:disabled) { background: var(--accent); color: #111; }
+.announce-btn:disabled { opacity: 0.3; border-color: #555; color: #555; cursor: default; }
 
 .controls { margin-top: 10px; display: flex; gap: 10px; }
 .controls button {

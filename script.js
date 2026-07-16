@@ -7,7 +7,14 @@ const RANKS = ["9", "10", "J", "Q", "K", "A"];
 const SUIT_SYMBOL = { C: "♣", S: "♠", H: "♥", D: "♦" };
 const SUIT_COLOR = { C: "black", S: "black", H: "red", D: "red" };
 const CARD_VALUE = { "9": 0, "10": 10, "J": 2, "Q": 3, "K": 4, "A": 11 };
-const PLAYER_NAMES = ["You", "CPU West", "CPU North", "CPU East"];
+const PLAYER_NAMES = ["You", "Herbert", "Gisela", "Dieter"];
+
+// Tournament-rule announcement deadlines: the announcing player must still hold at least this
+// many cards. Partnership (Re/Kontra) is only valid through the player's own first card; each
+// Absage ("keine 90/60/30", "schwarz") has its own, later deadline, and requires that the
+// announcer's own party has already announced Re/Kontra.
+const ANNOUNCE_MIN_HAND = { partnership: 11, "90": 10, "60": 9, "30": 8, schwarz: 7 };
+const ABSAGE_LEVELS = ["90", "60", "30", "schwarz"];
 
 // Highest to lowest trump. Both copies of the 10 of Hearts outrank even the Queen of Clubs
 // (a common regional house rule); the rest of the Hearts suit (A, K, 9) stays a plain suit.
@@ -46,6 +53,11 @@ const state = {
   roundNumber: 0,
   roundActive: false,
   busy: false,
+  announcements: {
+    RE: { partnership: false, levels: [] },
+    KONTRA: { partnership: false, levels: [] },
+  },
+  revealed: [null, null, null, null], // per player: null, or the team they've shown themselves to be
 };
 
 /* ============================== DECK / DEAL ============================= */
@@ -99,12 +111,20 @@ function dealNewRound() {
   state.roundNumber++;
   state.roundActive = true;
   state.busy = false;
+  state.announcements = {
+    RE: { partnership: false, levels: [] },
+    KONTRA: { partnership: false, levels: [] },
+  };
+  state.revealed = [null, null, null, null];
 
   document.getElementById("btn-new-round").classList.add("hidden");
   document.getElementById("btn-start").classList.add("hidden");
 
   renderAll();
   log(`— Round ${state.roundNumber} dealt. You hold the ${state.teams[0] === "RE" ? "♣Q" : "no ♣Q"} — you play for <b>${state.teams[0]}</b>. —`, true);
+
+  for (let idx = 1; idx <= 3; idx++) aiConsiderPartnership(idx);
+  renderAll();
   maybeAiTurn();
 }
 
@@ -140,6 +160,77 @@ function evaluateTrick(trick) {
   let best = matching[0];
   for (const t of matching) if (plainRank(t.card) < plainRank(best.card)) best = t;
   return best.playerIndex;
+}
+
+/* ============================== ANNOUNCEMENTS (ANSAGEN) ==================== */
+// Tournament rules: a party member may call "Re"/"Kontra" while they still hold >=11 cards
+// (i.e. before or with their own first card). After their own party has announced, either
+// member may escalate with "keine 90/60/30" or "schwarz", each with its own later hand-size
+// deadline. Playing a Queen of Clubs, or making any announcement, publicly reveals that
+// individual player's team (not necessarily their partner's).
+
+function canAnnouncePartnership(playerIdx) {
+  if (!state.roundActive) return false;
+  const team = state.teams[playerIdx];
+  if (state.announcements[team].partnership) return false;
+  return state.hands[playerIdx].length >= ANNOUNCE_MIN_HAND.partnership;
+}
+
+function canAnnounceAbsage(playerIdx, level) {
+  if (!state.roundActive) return false;
+  const team = state.teams[playerIdx];
+  if (!state.announcements[team].partnership) return false;
+  if (state.announcements[team].levels.includes(level)) return false;
+  return state.hands[playerIdx].length >= ANNOUNCE_MIN_HAND[level];
+}
+
+function revealPlayer(playerIdx) {
+  if (state.revealed[playerIdx]) return;
+  state.revealed[playerIdx] = state.teams[playerIdx];
+}
+
+function announcePartnership(playerIdx) {
+  if (!canAnnouncePartnership(playerIdx)) return;
+  const team = state.teams[playerIdx];
+  state.announcements[team].partnership = true;
+  revealPlayer(playerIdx);
+  log(`${playerName(playerIdx)} announces <b>"${team === "RE" ? "Re" : "Kontra"}"!</b>`, true);
+  renderAll();
+}
+
+function announceAbsage(playerIdx, level) {
+  if (!canAnnounceAbsage(playerIdx, level)) return;
+  const team = state.teams[playerIdx];
+  state.announcements[team].levels.push(level);
+  revealPlayer(playerIdx);
+  const label = level === "schwarz" ? "schwarz" : `keine ${level}`;
+  log(`${playerName(playerIdx)} calls <b>"${label}"</b> against the opposing team!`, true);
+  renderAll();
+}
+
+function handStrength(hand) {
+  const trumps = hand.filter(isTrump).length;
+  const aces = hand.filter(c => !isTrump(c) && c.rank === "A").length;
+  return trumps * 2 + aces;
+}
+
+function aiConsiderPartnership(playerIdx) {
+  if (playerIdx === 0 || !canAnnouncePartnership(playerIdx)) return;
+  if (handStrength(state.hands[playerIdx]) >= 13) announcePartnership(playerIdx);
+}
+
+function aiConsiderAbsage(playerIdx) {
+  if (playerIdx === 0) return;
+  const team = state.teams[playerIdx];
+  if (!state.announcements[team].partnership || state.trickNumber === 0) return;
+  const ownPoints = team === "RE" ? state.reCardPoints : state.kontraCardPoints;
+  const avgPerTrick = ownPoints / state.trickNumber;
+  if (avgPerTrick < 17) return; // not dominant enough to raise the stakes further
+  for (const level of ABSAGE_LEVELS) {
+    if (state.announcements[team].levels.includes(level)) continue;
+    if (canAnnounceAbsage(playerIdx, level)) announceAbsage(playerIdx, level);
+    break; // only ever escalate one level per trick
+  }
 }
 
 /* ============================== AI ======================================== */
@@ -215,6 +306,7 @@ function playCard(playerIdx, card) {
   state.hands[playerIdx] = hand.filter(c => c.id !== card.id);
   state.trick.push({ playerIndex: playerIdx, card });
   log(`${playerName(playerIdx)} plays <b>${cardLabel(card)}</b>.`);
+  if (card.suit === "C" && card.rank === "Q") revealPlayer(playerIdx);
   renderAll();
 
   if (state.trick.length < 4) {
@@ -247,6 +339,8 @@ function resolveTrick() {
   state.currentPlayer = winnerIdx;
   state.leader = winnerIdx;
   state.busy = false;
+
+  for (let idx = 1; idx <= 3; idx++) aiConsiderAbsage(idx);
   renderAll();
 
   if (state.trickNumber === 12) {
@@ -281,6 +375,25 @@ function endRound() {
   if (loserPoints < 30) gameValue++;
   if (loserPoints === 0) gameValue++;
 
+  // Announcing Re or Kontra raises the stakes for the whole round: +2 points, awarded to
+  // whichever party ends up winning, regardless of who announced.
+  let announceBonus = 0;
+  if (state.announcements.RE.partnership) announceBonus += 2;
+  if (state.announcements.KONTRA.partnership) announceBonus += 2;
+
+  // Absagen ("keine 90/60/30", "schwarz") only pay off if the WINNING party made that specific
+  // call themselves, and the final score actually bears it out.
+  const winnerTeam = reWins ? "RE" : "KONTRA";
+  const winnerAbsageBonus = state.announcements[winnerTeam].levels.reduce((sum, level) => {
+    const met = level === "90" ? loserPoints < 90
+      : level === "60" ? loserPoints < 60
+        : level === "30" ? loserPoints < 30
+          : loserPoints === 0; // schwarz
+    return sum + (met ? 1 : 0);
+  }, 0);
+
+  gameValue += announceBonus + winnerAbsageBonus;
+
   let net = reWins ? gameValue : -gameValue; // from Re's perspective
   net += state.reDoppelkopf - state.kontraDoppelkopf;
 
@@ -290,8 +403,10 @@ function endRound() {
 
   log(`Round ${state.roundNumber} over. Re: ${state.reCardPoints} pts, Kontra: ${state.kontraCardPoints} pts. ${reWins ? "RE" : "KONTRA"} wins the round.`, true);
 
-  showRoundSummary({ reWins, gameValue, net, loserPoints });
-  renderScoreboard();
+  state.revealed = state.teams.slice(); // round is over - everyone's team is public now
+
+  showRoundSummary({ reWins, gameValue, net, loserPoints, announceBonus, winnerAbsageBonus });
+  renderAll();
   document.getElementById("btn-new-round").classList.remove("hidden");
   document.getElementById("btn-new-match").classList.remove("hidden");
 }
@@ -335,6 +450,11 @@ function renderHand() {
   document.getElementById("your-team").textContent = state.teams[0] || "?";
 }
 
+function teamTagHtml(team) {
+  if (!team) return "";
+  return ` <span class="team-tag ${team.toLowerCase()}">${team}</span>`;
+}
+
 function renderOpponents() {
   for (const idx of [1, 2, 3]) {
     const back = document.getElementById(`hand-${idx}`);
@@ -346,10 +466,28 @@ function renderOpponents() {
       back.appendChild(c);
     }
     const label = document.getElementById(`label-${idx}`);
+    label.innerHTML = playerName(idx) + teamTagHtml(state.revealed[idx]);
     label.classList.toggle("active", state.roundActive && state.currentPlayer === idx);
   }
   const label0 = document.querySelector(".hand-area .player-label");
   if (label0) label0.classList.toggle("active", state.roundActive && state.currentPlayer === 0);
+}
+
+function renderAnnouncements() {
+  const panel = document.getElementById("announce-panel");
+  if (!panel) return;
+  if (!state.roundActive) { panel.classList.add("hidden"); return; }
+  panel.classList.remove("hidden");
+
+  const team = state.teams[0];
+  const partnershipBtn = document.getElementById("btn-announce-partnership");
+  partnershipBtn.textContent = `Announce "${team === "RE" ? "Re" : "Kontra"}"`;
+  partnershipBtn.disabled = !canAnnouncePartnership(0);
+
+  for (const level of ABSAGE_LEVELS) {
+    const btn = document.getElementById(`btn-absage-${level}`);
+    btn.disabled = !canAnnounceAbsage(0, level);
+  }
 }
 
 function renderTrick() {
@@ -391,6 +529,7 @@ function renderAll() {
   renderTrick();
   renderScoreboard();
   renderTurnIndicator();
+  renderAnnouncements();
 }
 
 /* ============================== MODAL ===================================== */
@@ -410,7 +549,9 @@ function showRoundSummary(info) {
     </table>
     <p>Game value: <b>${info.gameValue}</b> point${info.gameValue === 1 ? "" : "s"}
       (loser had ${info.loserPoints} pts)${(state.reDoppelkopf + state.kontraDoppelkopf) > 0
-        ? ` + Doppelkopf bonuses (Re ${state.reDoppelkopf}, Kontra ${state.kontraDoppelkopf})` : ""}.</p>
+        ? ` + Doppelkopf bonuses (Re ${state.reDoppelkopf}, Kontra ${state.kontraDoppelkopf})` : ""}${info.announceBonus > 0
+        ? ` + ${info.announceBonus} for announced Re/Kontra` : ""}${info.winnerAbsageBonus > 0
+        ? ` + ${info.winnerAbsageBonus} for fulfilled Absage(n)` : ""}.</p>
     <p>Net swing: <b>${info.net >= 0 ? "+" : ""}${info.net}</b> for Re / <b>${info.net <= 0 ? "+" : "-"}${Math.abs(info.net)}</b> for Kontra.</p>
     <div class="modal-actions">
       <button id="modal-close">Continue</button>
@@ -440,6 +581,10 @@ document.addEventListener("DOMContentLoaded", () => {
   document.getElementById("btn-start").addEventListener("click", dealNewRound);
   document.getElementById("btn-new-round").addEventListener("click", dealNewRound);
   document.getElementById("btn-new-match").addEventListener("click", newMatch);
+  document.getElementById("btn-announce-partnership").addEventListener("click", () => announcePartnership(0));
+  for (const level of ABSAGE_LEVELS) {
+    document.getElementById(`btn-absage-${level}`).addEventListener("click", () => announceAbsage(0, level));
+  }
   renderScoreboard();
   log("Welcome to Doppelkopf! Click \"Start Match\" to deal the first round.", true);
 });
