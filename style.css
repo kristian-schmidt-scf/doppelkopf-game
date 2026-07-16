@@ -279,6 +279,8 @@ main {
 #log { font-size: 12.5px; line-height: 1.5; display: flex; flex-direction: column-reverse; }
 #log .log-entry { padding: 2px 0; border-bottom: 1px solid #222; }
 #log .log-entry.important { color: var(--accent); font-weight: 600; }
+#log .suit-red { color: #e0575f; }
+#log .suit-black { color: #e8e8e8; }
 
 #modal-overlay {
   position: fixed;

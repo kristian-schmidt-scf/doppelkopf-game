@@ -43,7 +43,8 @@ const GAME_TYPE_LABEL = {
 };
 
 // Builds the trump order (highest -> lowest) for a given game type. `schweinchenPlayer` !== null
-// inserts both Diamond Aces just below the top trump (Normal games only).
+// promotes both Diamond Aces to the single highest trump, above even the Ten of Hearts (Normal
+// games only).
 function buildTrumpOrder(gameType, schweinchenPlayer) {
   let order;
   if (gameType === GAME_TYPES.NORMAL) {
@@ -65,13 +66,17 @@ function buildTrumpOrder(gameType, schweinchenPlayer) {
   }
   if (schweinchenPlayer !== null && schweinchenPlayer !== undefined && gameType === GAME_TYPES.NORMAL) {
     order = order.filter(k => k !== "D-A");
-    order.splice(1, 0, "D-A"); // just below the top trump
+    order.unshift("D-A"); // Schweinchen: the single highest trump, above the Ten of Hearts
   }
   return order;
 }
 
 function cardValue(card) { return CARD_VALUE[card.rank]; }
 function cardLabel(card) { return `${card.rank}${SUIT_SYMBOL[card.suit]}`; }
+function cardLabelHtml(card) {
+  const cls = SUIT_COLOR[card.suit] === "red" ? "suit-red" : "suit-black";
+  return `<span class="${cls}">${cardLabel(card)}</span>`;
+}
 function playerName(idx) { return PLAYER_NAMES[idx]; }
 
 /* ============================== SETTINGS ================================= */
@@ -247,6 +252,7 @@ function dealNewRound() {
   state.gameType = GAME_TYPES.NORMAL;
   state.trumpOrder = buildTrumpOrder(GAME_TYPES.NORMAL, null);
   state.trumpRankMap = new Map(state.trumpOrder.map((k, i) => [k, i]));
+  state.hands[0].sort(handComparator); // sort as a normal game while the Vorbehalte are still being asked
   state.isSolo = false;
   state.soloPlayer = null;
   state.isHochzeit = false;
@@ -374,7 +380,7 @@ function detectSchweinchenAndGenschern() {
   state.trumpOrder = buildTrumpOrder(GAME_TYPES.NORMAL, schweinchenPlayer);
   state.trumpRankMap = new Map(state.trumpOrder.map((k, i) => [k, i]));
   if (schweinchenPlayer !== null) {
-    log(`${playerName(schweinchenPlayer)} holds both Diamond Aces - <b>Schweinchen!</b> Both are now the top trumps (below the Ten of Hearts).`, true);
+    log(`${playerName(schweinchenPlayer)} holds both Diamond Aces - <b>Schweinchen!</b> They are now the single highest trump, above the Ten of Hearts.`, true);
   }
 
   state.genschernPlayer = null;
@@ -397,7 +403,8 @@ function startNormalRound() {
   state.gameType = GAME_TYPES.NORMAL;
   state.teams = state.hands.map(hand => hand.some(c => c.suit === "C" && c.rank === "Q") ? "RE" : "KONTRA");
   detectSchweinchenAndGenschern();
-  log(`Normal game. You hold the ${state.teams[0] === "RE" ? "♣Q" : "no ♣Q"} - you play for <b>${state.teams[0]}</b>.`, true);
+  const clubQueenHtml = cardLabelHtml({ suit: "C", rank: "Q" });
+  log(`Normal game. You hold ${state.teams[0] === "RE" ? clubQueenHtml : "no " + clubQueenHtml} - you play for <b>${state.teams[0]}</b>.`, true);
   for (let idx = 1; idx <= 3; idx++) aiConsiderPartnership(idx);
   beginPlayPhase();
 }
@@ -487,6 +494,31 @@ function revealPlayer(playerIdx) {
   state.revealed[playerIdx] = state.teams[playerIdx];
 }
 
+// What `observerIdx` can honestly claim to know about `targetIdx`'s team. Everyone always knows
+// their own team (it's determined by their own hand/actions); anyone else's team is only known
+// once it's been publicly revealed (announced, a played ♣Q, a solo/Hochzeit/Armut/Genschern
+// declaration). AI decisions that depend on "is this player my partner" must go through this
+// instead of reading `state.teams` directly, or they end up playing with information a real
+// player wouldn't have yet.
+function believedTeam(observerIdx, targetIdx) {
+  if (targetIdx === observerIdx) return state.teams[observerIdx];
+  return state.revealed[targetIdx];
+}
+
+// Whether the full Re/Kontra split is public knowledge yet. Solo, a resolved Hochzeit, Armut, and
+// a used Genschern all fix a specific pairing the moment they're declared/resolved, so the whole
+// table is implicitly known from that point on even without every player individually announcing.
+// A plain Normal game has no such structural tell, so it only counts once every player has been
+// explicitly revealed - otherwise showing a Re/Kontra point split would leak who's on which side
+// before anyone announced it.
+function teamsFullyKnown() {
+  if (state.isSolo) return true;
+  if (state.isHochzeit) return state.hochzeitResolved;
+  if (state.isArmut) return true;
+  if (state.genschernUsed) return true;
+  return state.revealed.every(t => t !== null);
+}
+
 function announcePartnership(playerIdx) {
   if (!canAnnouncePartnership(playerIdx)) return;
   const team = state.teams[playerIdx];
@@ -550,7 +582,10 @@ function chooseAiCard(playerIndex) {
 
   const myTeam = state.teams[playerIndex];
   const winningIdx = evaluateTrick(state.trick);
-  const partnerWinning = myTeam !== null && state.teams[winningIdx] === myTeam;
+  // Only treat the current trick-winner as a partner worth feeding points to if their team has
+  // actually been revealed - otherwise the AI would be playing with knowledge a real player at
+  // the table doesn't have yet.
+  const partnerWinning = myTeam !== null && believedTeam(playerIndex, winningIdx) === myTeam;
   const isLastToPlay = state.trick.length === 3;
 
   const winningMoves = legal.filter(card => {
@@ -614,7 +649,7 @@ function playCard(playerIdx, card) {
 
   state.hands[playerIdx] = hand.filter(c => c.id !== card.id);
   state.trick.push({ playerIndex: playerIdx, card });
-  log(`${playerName(playerIdx)} plays <b>${cardLabel(card)}</b>.`);
+  log(`${playerName(playerIdx)} plays <b>${cardLabelHtml(card)}</b>.`);
   if (card.suit === "C" && card.rank === "Q") revealPlayer(playerIdx);
 
   if (settings.genschern && state.genschernPlayer === playerIdx && !state.genschernUsed && card.suit === "D" && card.rank === "K") {
@@ -764,16 +799,19 @@ function endRound() {
   if (settings.fuchs) net += (state.reFuchs - state.kontraFuchs);
   if (settings.karlchen) net += (state.reKarlchen - state.kontraKarlchen);
 
+  const roundSwings = [0, 0, 0, 0];
   state.teams.forEach((team, idx) => {
     const swing = team === "RE" ? net : -net;
-    state.matchScores[idx] += state.isSolo && idx === state.soloPlayer ? swing * 3 : swing;
+    const playerSwing = state.isSolo && idx === state.soloPlayer ? swing * 3 : swing;
+    state.matchScores[idx] += playerSwing;
+    roundSwings[idx] = playerSwing;
   });
 
   log(`Round ${state.roundNumber} over (${gameTypeDisplayLabel()}). Re: ${state.reCardPoints} pts, Kontra: ${state.kontraCardPoints} pts. ${reWins ? "RE" : "KONTRA"} wins the round.`, true);
 
   state.revealed = state.teams.slice();
 
-  showRoundSummary({ reWins, gameValue, net, loserPoints, announceBonus, winnerAbsageBonus });
+  showRoundSummary({ reWins, gameValue, net, loserPoints, announceBonus, winnerAbsageBonus, roundSwings });
   renderAll();
   document.getElementById("btn-new-round").classList.remove("hidden");
   document.getElementById("btn-new-match").classList.remove("hidden");
@@ -931,7 +969,12 @@ function renderScoreboard() {
   if (state.roundActive && state.phase === "playing") {
     const div = document.createElement("div");
     div.className = "sb-entry";
-    div.innerHTML = `Trick ${state.trickNumber + 1}/12 &nbsp; Re: <b>${state.reCardPoints}</b> · Kontra: <b>${state.kontraCardPoints}</b>`;
+    if (teamsFullyKnown()) {
+      div.innerHTML = `Trick ${state.trickNumber + 1}/12 &nbsp; Re: <b>${state.reCardPoints}</b> · Kontra: <b>${state.kontraCardPoints}</b>`;
+    } else {
+      const totalPoints = state.reCardPoints + state.kontraCardPoints;
+      div.innerHTML = `Trick ${state.trickNumber + 1}/12 &nbsp; Points taken so far: <b>${totalPoints}</b>`;
+    }
     sb.appendChild(div);
   }
 }
@@ -997,17 +1040,26 @@ function showRoundSummary(info) {
   if (info.announceBonus > 0) bonusBits.push(`${info.announceBonus} for announced Re/Kontra`);
   if (info.winnerAbsageBonus > 0) bonusBits.push(`${info.winnerAbsageBonus} for fulfilled Absage(n)`);
 
+  const playerRows = [0, 1, 2, 3].map(i => {
+    const swing = info.roundSwings[i];
+    const swingText = `${swing > 0 ? "+" : ""}${swing}`;
+    return `<tr>
+      <td>${playerName(i)}${teamTagHtml(state.teams[i])}</td>
+      <td>${swingText}</td>
+      <td><b>${state.matchScores[i]}</b></td>
+    </tr>`;
+  }).join("");
+
   showModal(`
     <h2>${info.reWins ? "RE wins the round!" : "KONTRA wins the round!"}</h2>
     <p><b>${gameTypeDisplayLabel()}</b>${state.isSolo ? " - score tripled for the solo player" : ""}</p>
-    <table>
-      <tr><th></th><th>Team</th><th>Card points</th></tr>
-      <tr><td>Re</td><td>${reTeamPlayers}</td><td>${state.reCardPoints}</td></tr>
-      <tr><td>Kontra</td><td>${kontraTeamPlayers}</td><td>${state.kontraCardPoints}</td></tr>
-    </table>
+    <p>Card points — Re (${reTeamPlayers}): <b>${state.reCardPoints}</b> &nbsp; Kontra (${kontraTeamPlayers}): <b>${state.kontraCardPoints}</b></p>
     <p>Game value: <b>${info.gameValue}</b> point${info.gameValue === 1 ? "" : "s"}
       (loser had ${info.loserPoints} pts)${bonusBits.length > 0 ? " + " + bonusBits.join(", ") : ""}.</p>
-    <p>Net swing: <b>${info.net >= 0 ? "+" : ""}${info.net}</b> for Re / <b>${info.net <= 0 ? "+" : "-"}${Math.abs(info.net)}</b> for Kontra${state.isSolo ? " (before the solo player's x3)" : ""}.</p>
+    <table>
+      <tr><th>Player</th><th>This round</th><th>Match total</th></tr>
+      ${playerRows}
+    </table>
     <div class="modal-actions">
       <button id="modal-close">Continue</button>
     </div>
