@@ -579,16 +579,32 @@ function aiConsiderPartnership(playerIdx) {
   if (handStrength(state.hands[playerIdx]) >= 13) announcePartnership(playerIdx);
 }
 
+// How many tricks must have been played before the AI will even consider announcing each level.
+// Tournament deadlines (ANNOUNCE_MIN_HAND) force every Absage to be committed early - by trick
+// 2/3/4/5 for keine-90/60/30/schwarz respectively, since the hand-size floor keeps shrinking - so
+// there's no room to "wait for more evidence" the way a naive fix might reach for. Instead these
+// match each level's deadline exactly: the AI waits for the most evidence it's legally allowed to
+// gather before deciding, rather than jumping at the first opportunity like the old code did.
+const ABSAGE_MIN_TRICKS = { "90": 2, "60": 3, "30": 4, "schwarz": 5 };
+// The opponent's own points (not the announcer's) are what each level actually claims about, so
+// that's what gates escalation. `fraction` is how much of the opponent's pace-adjusted allowance
+// (their threshold, pro-rated for tricks played so far) they're still permitted to have used up -
+// the deeper the level, the less room for error is left to survive an unlucky trick or two.
+const ABSAGE_OPPONENT_THRESHOLD = { "90": 90, "60": 60, "30": 30, "schwarz": 0 };
+const ABSAGE_PACE_FRACTION = { "90": 0.5, "60": 0.35, "30": 0.2, "schwarz": 0 };
+
 function aiConsiderAbsage(playerIdx) {
   if (playerIdx === 0) return;
   const team = state.teams[playerIdx];
-  if (!team || !state.announcements[team].partnership || state.trickNumber === 0) return;
-  const ownPoints = team === "RE" ? state.reCardPoints : state.kontraCardPoints;
-  const avgPerTrick = ownPoints / state.trickNumber;
-  if (avgPerTrick < 17) return;
+  if (!team || !state.announcements[team].partnership) return;
+
+  const opponentPoints = team === "RE" ? state.kontraCardPoints : state.reCardPoints;
   for (const level of ABSAGE_LEVELS) {
     if (state.announcements[team].levels.includes(level)) continue;
-    if (canAnnounceAbsage(playerIdx, level)) announceAbsage(playerIdx, level);
+    if (state.trickNumber < ABSAGE_MIN_TRICKS[level]) break; // levels are checked in escalating order, so a later one would fail this too
+    if (!canAnnounceAbsage(playerIdx, level)) break;
+    const allowedSoFar = ABSAGE_OPPONENT_THRESHOLD[level] * (state.trickNumber / 12) * ABSAGE_PACE_FRACTION[level];
+    if (opponentPoints <= allowedSoFar) announceAbsage(playerIdx, level);
     break;
   }
 }
