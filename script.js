@@ -768,10 +768,42 @@ function maybeAiTurn() {
 
 /* ============================== SCORING =================================== */
 
+// Whether an Absage ("keine 90/60/30", "schwarz") - a claim that the OPPONENT's card points will
+// stay under a threshold - actually held, given the opponent's real final card points.
+function metAbsageLevel(level, opponentPoints) {
+  return level === "90" ? opponentPoints < 90
+    : level === "60" ? opponentPoints < 60
+      : level === "30" ? opponentPoints < 30
+        : opponentPoints === 0;
+}
+
+// The strongest (most specific) claim a team made, since each deeper level subsumes the shallower
+// ones (e.g. "schwarz" implies "keine 30" implies "keine 60" implies "keine 90").
+function deepestAbsageLevel(levels) {
+  for (let i = ABSAGE_LEVELS.length - 1; i >= 0; i--) {
+    if (levels.includes(ABSAGE_LEVELS[i])) return ABSAGE_LEVELS[i];
+  }
+  return null;
+}
+
 function endRound() {
   state.roundActive = false;
-  const reWins = state.reCardPoints >= 121;
+
+  // An Absage raises the bar for actually winning the round, not just for bonus points: the
+  // announcing side must make good on the deepest claim they made (that the opponent stays under
+  // that many points), or they lose outright even if they'd otherwise clear the base 121.
+  const reDeepest = deepestAbsageLevel(state.announcements.RE.levels);
+  const kontraDeepest = deepestAbsageLevel(state.announcements.KONTRA.levels);
+  const reContractFailed = reDeepest !== null && !metAbsageLevel(reDeepest, state.kontraCardPoints);
+  const kontraContractFailed = kontraDeepest !== null && !metAbsageLevel(kontraDeepest, state.reCardPoints);
+
+  let reWins = state.reCardPoints >= 121;
+  let contractFlip = null;
+  if (reContractFailed) { reWins = false; contractFlip = "RE"; }
+  else if (kontraContractFailed) { reWins = true; contractFlip = "KONTRA"; }
+
   const loserPoints = reWins ? state.kontraCardPoints : state.reCardPoints;
+  const winnerPoints = reWins ? state.reCardPoints : state.kontraCardPoints;
 
   let gameValue = 1;
   if (loserPoints < 90) gameValue++;
@@ -784,15 +816,18 @@ function endRound() {
   if (state.announcements.KONTRA.partnership) announceBonus += 2;
 
   const winnerTeam = reWins ? "RE" : "KONTRA";
-  const winnerAbsageBonus = state.announcements[winnerTeam].levels.reduce((sum, level) => {
-    const met = level === "90" ? loserPoints < 90
-      : level === "60" ? loserPoints < 60
-        : level === "30" ? loserPoints < 30
-          : loserPoints === 0;
-    return sum + (met ? 1 : 0);
-  }, 0);
+  const loserTeam = reWins ? "KONTRA" : "RE";
 
-  gameValue += announceBonus + winnerAbsageBonus;
+  const winnerAbsageBonus = state.announcements[winnerTeam].levels.reduce((sum, level) =>
+    sum + (metAbsageLevel(level, loserPoints) ? 1 : 0), 0);
+
+  // Each Absage the LOSING side announced but failed to back up ("gegen die eigene Ansage
+  // gespielt") is worth an extra point to the winner too - on top of costing them the round if it
+  // was their deepest claim.
+  const loserBrokenAbsageBonus = state.announcements[loserTeam].levels.reduce((sum, level) =>
+    sum + (metAbsageLevel(level, winnerPoints) ? 0 : 1), 0);
+
+  gameValue += announceBonus + winnerAbsageBonus + loserBrokenAbsageBonus;
 
   let net = reWins ? gameValue : -gameValue;
   net += (state.reDoppelkopf - state.kontraDoppelkopf);
@@ -807,11 +842,17 @@ function endRound() {
     roundSwings[idx] = playerSwing;
   });
 
+  if (contractFlip) {
+    const deepest = contractFlip === "RE" ? reDeepest : kontraDeepest;
+    const displayLabel = deepest === "schwarz" ? "schwarz" : `keine ${deepest}`;
+    const opponentPoints = contractFlip === "RE" ? state.kontraCardPoints : state.reCardPoints;
+    log(`${contractFlip}'s "${displayLabel}" call failed (opponent reached ${opponentPoints} pts) - ${winnerTeam} wins the round outright regardless of card points!`, true);
+  }
   log(`Round ${state.roundNumber} over (${gameTypeDisplayLabel()}). Re: ${state.reCardPoints} pts, Kontra: ${state.kontraCardPoints} pts. ${reWins ? "RE" : "KONTRA"} wins the round.`, true);
 
   state.revealed = state.teams.slice();
 
-  showRoundSummary({ reWins, gameValue, net, loserPoints, announceBonus, winnerAbsageBonus, roundSwings });
+  showRoundSummary({ reWins, gameValue, net, loserPoints, announceBonus, winnerAbsageBonus, loserBrokenAbsageBonus, roundSwings });
   renderAll();
   document.getElementById("btn-new-round").classList.remove("hidden");
   document.getElementById("btn-new-match").classList.remove("hidden");
@@ -1039,6 +1080,7 @@ function showRoundSummary(info) {
   if (settings.karlchen && (state.reKarlchen + state.kontraKarlchen) > 0) bonusBits.push(`Karlchen (Re ${state.reKarlchen}, Kontra ${state.kontraKarlchen})`);
   if (info.announceBonus > 0) bonusBits.push(`${info.announceBonus} for announced Re/Kontra`);
   if (info.winnerAbsageBonus > 0) bonusBits.push(`${info.winnerAbsageBonus} for fulfilled Absage(n)`);
+  if (info.loserBrokenAbsageBonus > 0) bonusBits.push(`${info.loserBrokenAbsageBonus} for the losing side's broken Absage(n)`);
 
   const playerRows = [0, 1, 2, 3].map(i => {
     const swing = info.roundSwings[i];
