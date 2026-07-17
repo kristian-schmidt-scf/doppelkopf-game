@@ -121,7 +121,13 @@ const state = {
   kontraFuchs: 0,
   reKarlchen: 0,
   kontraKarlchen: 0,
-  playerPoints: [0, 0, 0, 0], // card points won by each individual player (for Genschern's AI heuristic)
+  // Per-player ledgers, independent of team labels - the source of truth that the Re/Kontra team
+  // totals above are derived from (see recomputeTeamTotals). Needed because Genschern can reassign
+  // state.teams mid-round, after some of these have already accrued under the old assignment.
+  playerPoints: [0, 0, 0, 0],
+  playerDoppelkopf: [0, 0, 0, 0],
+  playerFuchs: [0, 0, 0, 0],
+  playerKarlchen: [0, 0, 0, 0],
   matchScores: [0, 0, 0, 0],
   roundNumber: 0,
   roundActive: false,
@@ -239,6 +245,9 @@ function dealNewRound(redeal) {
   state.reKarlchen = 0;
   state.kontraKarlchen = 0;
   state.playerPoints = [0, 0, 0, 0];
+  state.playerDoppelkopf = [0, 0, 0, 0];
+  state.playerFuchs = [0, 0, 0, 0];
+  state.playerKarlchen = [0, 0, 0, 0];
   // Schmeissen redeals with the same dealer (the thrown-in hand doesn't count as a played round);
   // every other path advances the dealer and round counter as normal.
   if (!isRedeal) {
@@ -642,6 +651,10 @@ function resolveGenschernChoice(chooserIdx, partnerIdx) {
   state.genschernUsed = true;
   state.teams = [0, 1, 2, 3].map(i => (i === chooserIdx || i === partnerIdx) ? "RE" : "KONTRA");
   state.revealed = state.teams.slice(); // declaring it is inherently public
+  // Tricks already played were tallied under the OLD team split - rebuild the Re/Kontra totals
+  // from the per-player ledgers now that the teams have changed, or points/bonuses already earned
+  // would stay stuck under whichever side used to hold that player.
+  recomputeTeamTotals();
   log(`${playerName(chooserIdx)} calls <b>"Genscher"</b> and picks ${playerName(partnerIdx)} as their new partner for the rest of the round!`, true);
   renderAll();
 }
@@ -700,6 +713,26 @@ function continueAfterCardPlayed(playerIdx) {
   }
 }
 
+// Derives the Re/Kontra team totals from the per-player ledgers under the CURRENT state.teams.
+// Must be called any time state.teams changes after tricks have already been played (currently
+// only Genschern does this), or a stale team's totals would keep counting points/bonuses earned
+// by a player who has since switched sides.
+function recomputeTeamTotals() {
+  state.reCardPoints = 0; state.kontraCardPoints = 0;
+  state.reDoppelkopf = 0; state.kontraDoppelkopf = 0;
+  state.reFuchs = 0; state.kontraFuchs = 0;
+  state.reKarlchen = 0; state.kontraKarlchen = 0;
+  for (let i = 0; i < 4; i++) {
+    const team = state.teams[i];
+    if (team !== "RE" && team !== "KONTRA") continue; // undecided (mid-Hochzeit) - nothing to credit yet
+    const sign = team === "RE" ? "re" : "kontra";
+    state[sign + "CardPoints"] += state.playerPoints[i];
+    state[sign + "Doppelkopf"] += state.playerDoppelkopf[i];
+    state[sign + "Fuchs"] += state.playerFuchs[i];
+    state[sign + "Karlchen"] += state.playerKarlchen[i];
+  }
+}
+
 function resolveTrick() {
   const winnerIdx = evaluateTrick(state.trick);
 
@@ -731,19 +764,13 @@ function resolveTrick() {
   const trickPoints = state.trick.reduce((s, t) => s + cardValue(t.card), 0);
   const winningTeam = state.teams[winnerIdx];
 
-  if (winningTeam === "RE") {
-    state.reCardPoints += trickPoints;
-    if (trickPoints >= 40) state.reDoppelkopf++;
-  } else {
-    state.kontraCardPoints += trickPoints;
-    if (trickPoints >= 40) state.kontraDoppelkopf++;
-  }
   state.playerPoints[winnerIdx] += trickPoints;
+  if (trickPoints >= 40) state.playerDoppelkopf[winnerIdx]++;
 
   if (settings.fuchs) {
     for (const play of state.trick) {
       if (play.card.suit === "D" && play.card.rank === "A" && state.teams[play.playerIndex] !== winningTeam) {
-        if (winningTeam === "RE") state.reFuchs++; else state.kontraFuchs++;
+        state.playerFuchs[winnerIdx]++;
         log(`${playerName(winnerIdx)}'s team catches a <b>Fuchs</b> (Diamond Ace)!`, true);
       }
     }
@@ -751,10 +778,11 @@ function resolveTrick() {
   if (settings.karlchen && state.trickNumber === 11) {
     const clubJackPlay = state.trick.find(t => t.card.suit === "C" && t.card.rank === "J");
     if (clubJackPlay && clubJackPlay.playerIndex === winnerIdx) {
-      if (winningTeam === "RE") state.reKarlchen = 1; else state.kontraKarlchen = 1;
+      state.playerKarlchen[winnerIdx] = 1;
       log(`${playerName(winnerIdx)} takes the last trick with the Club Jack - <b>Karlchen!</b>`, true);
     }
   }
+  recomputeTeamTotals();
 
   log(`${playerName(winnerIdx)} wins the trick (${trickPoints} pts).`, true);
 
