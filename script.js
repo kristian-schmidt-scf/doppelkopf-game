@@ -89,6 +89,7 @@ const settings = {
   fuchs: true,
   schweinchen: true,
   genschern: true,
+  schmeissen: true,
 };
 
 function readSettingsFromUI() {
@@ -99,6 +100,7 @@ function readSettingsFromUI() {
   settings.fuchs = document.getElementById("setting-fuchs").checked;
   settings.schweinchen = document.getElementById("setting-schweinchen").checked;
   settings.genschern = document.getElementById("setting-genschern").checked;
+  settings.schmeissen = document.getElementById("setting-schmeissen").checked;
 }
 
 /* ============================== STATE =================================== */
@@ -219,7 +221,8 @@ function handComparator(a, b) {
   return plainRank(a) - plainRank(b);
 }
 
-function dealNewRound() {
+function dealNewRound(redeal) {
+  const isRedeal = redeal === true; // guards against the click handler passing its MouseEvent through
   readSettingsFromUI();
   const deck = shuffle(createDeck());
   state.hands = [[], [], [], []];
@@ -236,10 +239,14 @@ function dealNewRound() {
   state.reKarlchen = 0;
   state.kontraKarlchen = 0;
   state.playerPoints = [0, 0, 0, 0];
-  state.dealer = (state.dealer + 1) % 4;
+  // Schmeissen redeals with the same dealer (the thrown-in hand doesn't count as a played round);
+  // every other path advances the dealer and round counter as normal.
+  if (!isRedeal) {
+    state.dealer = (state.dealer + 1) % 4;
+    state.roundNumber++;
+  }
   state.leader = (state.dealer + 1) % 4;
   state.currentPlayer = state.leader;
-  state.roundNumber++;
   state.roundActive = true;
   state.busy = false;
   state.announcements = {
@@ -268,15 +275,17 @@ function dealNewRound() {
   document.getElementById("btn-start").classList.add("hidden");
   document.getElementById("settings-panel").classList.add("hidden");
 
-  log(`— Round ${state.roundNumber} dealt. —`, true);
+  log(isRedeal ? `— Redealt by the same dealer (Round ${state.roundNumber}). —` : `— Round ${state.roundNumber} dealt. —`, true);
   startBiddingPhase();
 }
 
 /* ============================== BIDDING PHASE (VORBEHALTE) ================ */
 // After dealing, players are asked in turn (starting left of the dealer) whether they have a
-// reservation. Precedence: Solo > Hochzeit > Armut > healthy. Whoever holds the highest-precedence
-// declaration (earliest-asked wins ties) determines the round; "Pflichtsolo" (a forced solo for a
-// trump-less hand) isn't modeled - every solo here is a voluntary "Lustsolo".
+// reservation. Precedence: Schmeissen > Solo > Hochzeit > Armut > healthy. Schmeissen throws the
+// whole deal out regardless of anyone else's declaration - it's not really a Vorbehalt so much as
+// a veto of the deal itself. Whoever holds the highest-precedence declaration (earliest-asked wins
+// ties) determines the round; "Pflichtsolo" (a forced solo for a trump-less hand) isn't modeled -
+// every solo here is a voluntary "Lustsolo".
 
 function countTrumpsForGameType(hand, gameType) {
   const order = buildTrumpOrder(gameType, null);
@@ -297,6 +306,9 @@ function aiChooseSoloType(hand) {
 function aiDecideBidding(playerIdx) {
   const hand = state.hands[playerIdx];
 
+  if (settings.schmeissen && hand.filter(c => c.rank === "K").length >= 5) {
+    return { type: "schmeissen" };
+  }
   if (settings.solos) {
     // Picking the best of 7 candidate game types is a max-of-7 draw, which inflates how often a
     // hand looks "strong" far more than a naive per-type threshold suggests - calibrated against
@@ -345,7 +357,8 @@ function submitBiddingDeclaration(idx, decl) {
   state.biddingDeclarations[idx] = decl;
   if (decl.type !== "healthy") {
     const label = decl.type === "solo" ? GAME_TYPE_LABEL[decl.soloType]
-      : decl.type === "hochzeit" ? "Hochzeit" : "Armut";
+      : decl.type === "hochzeit" ? "Hochzeit"
+        : decl.type === "armut" ? "Armut" : "Schmeissen (5+ Kings)";
     log(`${playerName(idx)} has a reservation: <b>${label}</b>.`, true);
   }
   state.biddingStep++;
@@ -358,6 +371,9 @@ function resolveBidding() {
     .map(idx => ({ idx, decl: state.biddingDeclarations[idx] }))
     .filter(x => x.decl && x.decl.type !== "healthy");
 
+  const schmeissen = declared.find(x => x.decl.type === "schmeissen");
+  if (schmeissen) { schmeissenRedeal(schmeissen.idx); return; }
+
   const solo = declared.find(x => x.decl.type === "solo");
   const hochzeit = declared.find(x => x.decl.type === "hochzeit");
   const armut = declared.find(x => x.decl.type === "armut");
@@ -367,6 +383,11 @@ function resolveBidding() {
   else if (winner.decl.type === "solo") startSoloRound(winner.idx, winner.decl.soloType);
   else if (winner.decl.type === "hochzeit") startHochzeitRound(winner.idx);
   else startArmutRound(winner.idx);
+}
+
+function schmeissenRedeal(playerIdx) {
+  log(`${playerName(playerIdx)} holds 5 or more Kings and throws in the hand - <b>Schmeissen!</b> No round played; the same dealer redeals.`, true);
+  dealNewRound(true);
 }
 
 function detectSchweinchenAndGenschern() {
@@ -896,11 +917,20 @@ function renderHand() {
   }
   const teamLabel = state.teams[0] ? (state.isSolo && state.soloPlayer === 0 ? GAME_TYPE_LABEL[state.gameType] : state.teams[0]) : "undecided";
   document.getElementById("your-team").textContent = teamLabel;
+  document.getElementById("your-points-tag").innerHTML = pointsTagHtml(0);
 }
 
 function teamTagHtml(team) {
   if (!team) return "";
   return ` <span class="team-tag ${team.toLowerCase()}">${team}</span>`;
+}
+
+// Card points a player has personally captured so far this round - each player's own pile of won
+// tricks is physically visible to everyone at a real table, so this is never hidden information
+// the way the Re/Kontra team split is.
+function pointsTagHtml(idx) {
+  if (!state.roundActive || state.phase !== "playing") return "";
+  return ` <span class="points-tag">${state.playerPoints[idx]}</span>`;
 }
 
 function renderOpponents() {
@@ -914,7 +944,7 @@ function renderOpponents() {
       back.appendChild(c);
     }
     const label = document.getElementById(`label-${idx}`);
-    label.innerHTML = playerName(idx) + teamTagHtml(state.revealed[idx]);
+    label.innerHTML = playerName(idx) + pointsTagHtml(idx) + teamTagHtml(state.revealed[idx]);
     label.classList.toggle("active", state.roundActive && state.phase === "playing" && state.currentPlayer === idx);
   }
   const label0 = document.querySelector(".hand-area .player-label");
@@ -961,6 +991,9 @@ function renderBidding() {
 
   addBtn("Play normal", () => submitBiddingDeclaration(0, { type: "healthy" }));
 
+  if (settings.schmeissen && hand.filter(c => c.rank === "K").length >= 5) {
+    addBtn("Schmeissen (5+ Kings)", () => submitBiddingDeclaration(0, { type: "schmeissen" }));
+  }
   if (settings.solos) {
     const soloTypes = [GAME_TYPES.SOLO_C, GAME_TYPES.SOLO_S, GAME_TYPES.SOLO_H, GAME_TYPES.SOLO_D, GAME_TYPES.SOLO_Q, GAME_TYPES.SOLO_J, GAME_TYPES.SOLO_FLESHLESS];
     for (const gt of soloTypes) {

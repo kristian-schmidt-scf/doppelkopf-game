@@ -54,6 +54,8 @@
         highest trump, above the ♥10, for the round.</li>
         <li><strong>Genschern</strong> — whoever is dealt both ♦K may, upon playing the second one, publicly
         pick any other player as their partner for the rest of the round.</li>
+        <li><strong>Schmeissen</strong> — a player dealt 5 or more Kings may throw in the hand during the
+        reservation round. No round is played; the same dealer redeals.</li>
       </ul>
     </div>
   </details>
@@ -80,7 +82,7 @@
 </main>
 
 <section class="hand-area">
-  <div class="player-label">Your hand — Team: <span id="your-team">?</span></div>
+  <div class="player-label">You<span id="your-points-tag"></span> — Team: <span id="your-team">?</span></div>
   <div class="hand" id="hand-0"></div>
 
   <div class="announce-panel hidden" id="announce-panel">
@@ -106,6 +108,7 @@
     <label><input type="checkbox" id="setting-fuchs" checked> Fuchs</label>
     <label><input type="checkbox" id="setting-schweinchen" checked> Schweinchen</label>
     <label><input type="checkbox" id="setting-genschern" checked> Genschern</label>
+    <label><input type="checkbox" id="setting-schmeissen" checked> Schmeissen</label>
   </div>
 
   <div class="controls">
