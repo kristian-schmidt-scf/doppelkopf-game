@@ -1172,6 +1172,36 @@ function showRoundSummary(info) {
 
 /* ============================== INIT ======================================= */
 
+function copyLogText(text, onDone) {
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(text).then(onDone).catch(() => copyLogTextFallback(text, onDone));
+  } else {
+    copyLogTextFallback(text, onDone);
+  }
+}
+
+function copyLogTextFallback(text, onDone) {
+  const ta = document.createElement("textarea");
+  ta.value = text;
+  ta.style.position = "fixed";
+  ta.style.opacity = "0";
+  document.body.appendChild(ta);
+  ta.select();
+  try { document.execCommand("copy"); } catch (e) { /* clipboard unavailable - nothing more we can do */ }
+  document.body.removeChild(ta);
+  onDone();
+}
+
+function copyLog() {
+  const lines = Array.from(document.querySelectorAll("#log .log-entry")).map(el => el.textContent);
+  const btn = document.getElementById("btn-copy-log");
+  const original = btn.textContent;
+  copyLogText(lines.join("\n"), () => {
+    btn.textContent = "Copied!";
+    setTimeout(() => { btn.textContent = original; }, 1200);
+  });
+}
+
 function newMatch() {
   state.matchScores = [0, 0, 0, 0];
   state.dealer = -1;
@@ -1189,6 +1219,7 @@ document.addEventListener("DOMContentLoaded", () => {
   document.getElementById("btn-start").addEventListener("click", dealNewRound);
   document.getElementById("btn-new-round").addEventListener("click", dealNewRound);
   document.getElementById("btn-new-match").addEventListener("click", newMatch);
+  document.getElementById("btn-copy-log").addEventListener("click", copyLog);
   document.getElementById("btn-announce-partnership").addEventListener("click", () => announcePartnership(0));
   for (const level of ABSAGE_LEVELS) {
     document.getElementById(`btn-absage-${level}`).addEventListener("click", () => announceAbsage(0, level));

@@ -286,7 +286,19 @@ main {
   overflow-y: auto;
   max-height: 100vh;
 }
-.log-panel h2 { font-size: 15px; color: var(--accent); margin: 0 0 8px; }
+.log-header { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 8px; }
+.log-panel h2 { font-size: 15px; color: var(--accent); margin: 0; }
+.copy-log-btn {
+  background: transparent;
+  color: var(--accent);
+  border: 1px solid var(--accent);
+  padding: 3px 10px;
+  border-radius: 12px;
+  font-size: 11px;
+  font-weight: 700;
+  cursor: pointer;
+}
+.copy-log-btn:hover { background: var(--accent); color: #111; }
 #log { font-size: 12.5px; line-height: 1.5; display: flex; flex-direction: column-reverse; }
 #log .log-entry { padding: 2px 0; border-bottom: 1px solid #222; }
 #log .log-entry.important { color: var(--accent); font-weight: 600; }
