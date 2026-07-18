@@ -158,6 +158,11 @@ const state = {
   biddingOrder: [],
   biddingStep: 0,
   biddingDeclarations: [null, null, null, null],
+
+  // Per-player set of "effective suits" (see effectiveSuit()) each player has revealed they don't
+  // hold, by failing to follow suit at some point. Public information, used to make the Monte
+  // Carlo AI's determinized hand samples (see sampleDeterminizedHands) more realistic.
+  knownVoid: [new Set(), new Set(), new Set(), new Set()],
 };
 
 /* ============================== RULES (dynamic per game type) ============ */
@@ -165,6 +170,9 @@ const state = {
 function isTrump(card) { return state.trumpRankMap.has(card.suit + "-" + card.rank); }
 function trumpRank(card) { return state.trumpRankMap.get(card.suit + "-" + card.rank); }
 function plainRank(card) { return PLAIN_RANK.get(card.rank); }
+// The suit that matters for following-suit purposes: "TRUMP" for any trump card (regardless of
+// its physical suit), otherwise its physical (plain) suit.
+function effectiveSuit(card) { return isTrump(card) ? "TRUMP" : card.suit; }
 
 function getLegalMoves(hand, trick) {
   if (trick.length === 0) return hand.slice();
@@ -248,6 +256,7 @@ function dealNewRound(redeal) {
   state.playerDoppelkopf = [0, 0, 0, 0];
   state.playerFuchs = [0, 0, 0, 0];
   state.playerKarlchen = [0, 0, 0, 0];
+  state.knownVoid = [new Set(), new Set(), new Set(), new Set()];
   // Schmeissen redeals with the same dealer (the thrown-in hand doesn't count as a played round);
   // every other path advances the dealer and round counter as normal.
   if (!isRedeal) {
@@ -611,7 +620,151 @@ function aiConsiderAbsage(playerIdx) {
 
 /* ============================== AI (card play) ============================= */
 
+// Top-level entry point used by real game turns. Falls back to the fast heuristic whenever a
+// Monte Carlo rollout wouldn't be sound - mid-Hochzeit, before the partnership resolves, some
+// players' teams are still null, and the simplified rollout below doesn't model that resolution.
 function chooseAiCard(playerIndex) {
+  const hand = state.hands[playerIndex];
+  const legal = getLegalMoves(hand, state.trick);
+  if (legal.length === 1) return legal[0];
+
+  const teamsFullyAssigned = state.teams.every(t => t === "RE" || t === "KONTRA");
+  if (teamsFullyAssigned) return chooseAiCardMonteCarlo(playerIndex, legal);
+  return chooseAiCardHeuristic(playerIndex);
+}
+
+/* ---- Monte Carlo rollouts: for each legal card, sample plausible determinized worlds (guessing
+ * the other players' hidden hands, consistent with known voids), simulate the rest of the round
+ * forward with the fast heuristic driving every seat, and pick whichever card yields the best
+ * average card-point differential for the mover's team. Standard determinization + rollout, as
+ * used by real trick-taking-game bots (see issue #1). Simplifications, to keep this tractable:
+ *  - The value function is pure card-point differential (own team minus opponents'), not a full
+ *    replay of Ansagen/bonus scoring - a good proxy without re-simulating the entire scoring
+ *    engine for every sample.
+ *  - Team knowledge (who the AI believes is on which side) is frozen at whatever it is right now
+ *    for the whole rollout, rather than modeling how future ♣Q reveals/announcements might change
+ *    it - a minor approximation of a decision that's already a snapshot-in-time estimate anyway.
+ * ---- */
+
+const MC_ROLLOUTS_PER_CANDIDATE = 30;
+
+function chooseAiCardMonteCarlo(playerIndex, legal) {
+  const worlds = [];
+  for (let i = 0; i < MC_ROLLOUTS_PER_CANDIDATE; i++) worlds.push(sampleDeterminizedHands(playerIndex));
+
+  let bestCard = legal[0];
+  let bestScore = -Infinity;
+  for (const card of legal) {
+    let total = 0;
+    for (const world of worlds) total += runRollout(playerIndex, card, world);
+    const avg = total / worlds.length;
+    if (avg > bestScore) { bestScore = avg; bestCard = card; }
+  }
+  return bestCard;
+}
+
+// Guesses a full, consistent deal for the other three players: pools their combined unseen cards
+// (exactly the cards not in the mover's own hand and not yet played - see the deck-arithmetic note
+// below) and randomly redistributes them, respecting known voids where possible.
+//
+// pool = fullDeck - myHand - alreadyPlayed = union of the other three players' TRUE current hands
+// (as a set; every card not in my hand or already played must be held by exactly one of them).
+// Reading state.hands[i] for i != playerIndex to build this pool only ever uses that fact - it's
+// public information (hand sizes are visible, and "which cards remain" follows from the deck being
+// fixed) - not a peek at who holds which of those cards, which is what gets reshuffled below.
+function sampleDeterminizedHands(playerIndex) {
+  const others = [0, 1, 2, 3].filter(i => i !== playerIndex);
+  let pool = [];
+  for (const i of others) pool = pool.concat(state.hands[i]);
+
+  const eligibleOwners = (card) => others.filter(i => !state.knownVoid[i].has(effectiveSuit(card)));
+
+  for (let attempt = 0; attempt < 20; attempt++) {
+    // Most-constrained-first: place cards fewer players can legally hold before "easy" cards, so
+    // greedy assignment doesn't paint itself into a corner and silently break a known void.
+    const ordered = shuffle(pool.slice()).sort((a, b) => eligibleOwners(a).length - eligibleOwners(b).length);
+    const dealt = {}; others.forEach(i => { dealt[i] = []; });
+    let ok = true;
+    for (const card of ordered) {
+      const candidates = eligibleOwners(card).filter(i => dealt[i].length < state.hands[i].length);
+      if (candidates.length === 0) { ok = false; break; }
+      const chosen = candidates[Math.floor(Math.random() * candidates.length)];
+      dealt[chosen].push(card);
+    }
+    if (ok && others.every(i => dealt[i].length === state.hands[i].length)) {
+      const result = [null, null, null, null];
+      result[playerIndex] = state.hands[playerIndex].slice();
+      others.forEach(i => { result[i] = dealt[i]; });
+      return result;
+    }
+  }
+  // Fallback if the void constraints couldn't be satisfied after several tries (rare - would need
+  // contradictory or unsatisfiable void information): an unconstrained split still yields a legal,
+  // if less refined, sample rather than failing the AI's turn outright.
+  const shuffledPool = shuffle(pool.slice());
+  const result = [null, null, null, null];
+  result[playerIndex] = state.hands[playerIndex].slice();
+  let idx = 0;
+  for (const i of others) {
+    result[i] = shuffledPool.slice(idx, idx + state.hands[i].length);
+    idx += state.hands[i].length;
+  }
+  return result;
+}
+
+// Plays `firstCard` for `playerIndex` in a determinized copy of the current trick/hands, then
+// keeps simulating forward (every seat driven by the fast heuristic) through the rest of the
+// round, and returns the mover's team's final card-point advantage. Temporarily swaps the pieces
+// of global `state` a rollout touches and restores them before returning - safe because this all
+// runs synchronously with no other code able to observe the swapped-in values in between.
+function runRollout(playerIndex, firstCard, determinizedHands) {
+  const saved = {
+    hands: state.hands, trick: state.trick, trickNumber: state.trickNumber,
+    currentPlayer: state.currentPlayer, leader: state.leader,
+  };
+
+  state.hands = determinizedHands.map(h => h.slice());
+  state.trick = saved.trick.slice();
+
+  const simPoints = { RE: 0, KONTRA: 0 };
+  function applyCard(idx, card) {
+    state.hands[idx] = state.hands[idx].filter(c => c.id !== card.id);
+    state.trick.push({ playerIndex: idx, card });
+    if (state.trick.length === 4) {
+      const winnerIdx = evaluateTrick(state.trick);
+      const trickPoints = state.trick.reduce((s, t) => s + cardValue(t.card), 0);
+      simPoints[state.teams[winnerIdx]] += trickPoints;
+      state.trickNumber++;
+      state.trick = [];
+      state.currentPlayer = winnerIdx;
+      state.leader = winnerIdx;
+    } else {
+      state.currentPlayer = (idx + 1) % 4;
+    }
+  }
+
+  applyCard(playerIndex, firstCard);
+  while (state.trickNumber < 12) {
+    const idx = state.currentPlayer;
+    if (state.hands[idx].length === 0) break; // safety net; shouldn't trigger under correct bookkeeping
+    applyCard(idx, chooseAiCardHeuristic(idx));
+  }
+
+  state.hands = saved.hands;
+  state.trick = saved.trick;
+  state.trickNumber = saved.trickNumber;
+  state.currentPlayer = saved.currentPlayer;
+  state.leader = saved.leader;
+
+  const myTeam = state.teams[playerIndex];
+  const oppTeam = myTeam === "RE" ? "KONTRA" : "RE";
+  return simPoints[myTeam] - simPoints[oppTeam];
+}
+
+// The original fixed-rule heuristic: lead aces, feed a believed-winning partner, take a trick as
+// cheaply as possible when worth taking, otherwise discard low. Still used directly as the
+// fallback (see chooseAiCard) and as the fast policy driving every seat inside a rollout.
+function chooseAiCardHeuristic(playerIndex) {
   const hand = state.hands[playerIndex];
   const legal = getLegalMoves(hand, state.trick);
   if (legal.length === 1) return legal[0];
@@ -697,6 +850,9 @@ function playCard(playerIdx, card) {
     return;
   }
 
+  if (state.trick.length > 0 && effectiveSuit(card) !== effectiveSuit(state.trick[0].card)) {
+    state.knownVoid[playerIdx].add(effectiveSuit(state.trick[0].card));
+  }
   state.hands[playerIdx] = hand.filter(c => c.id !== card.id);
   state.trick.push({ playerIndex: playerIdx, card });
   log(`${playerName(playerIdx)} plays <b>${cardLabelHtml(card)}</b>.`);
