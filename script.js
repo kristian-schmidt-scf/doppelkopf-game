@@ -197,6 +197,10 @@ const state = {
     RE: { partnership: false, levels: [] },
     KONTRA: { partnership: false, levels: [] },
   },
+  // Source of truth the above is derived from (see recomputeAnnouncements) - who personally made
+  // which announcement, independent of team label.
+  playerAnnouncedPartnership: [false, false, false, false],
+  playerAnnouncedLevels: [[], [], [], []],
   revealed: [null, null, null, null],
 
   gameType: GAME_TYPES.NORMAL,
@@ -331,6 +335,8 @@ function dealNewRound(redeal) {
     RE: { partnership: false, levels: [] },
     KONTRA: { partnership: false, levels: [] },
   };
+  state.playerAnnouncedPartnership = [false, false, false, false];
+  state.playerAnnouncedLevels = [[], [], [], []];
   state.revealed = [null, null, null, null];
   state.teams = [null, null, null, null];
 
@@ -637,10 +643,31 @@ function teamsFullyKnown() {
   return state.revealed.every(t => t !== null);
 }
 
+// Announcements are personal commitments ("my side will...") tracked per player in
+// playerAnnouncedPartnership/playerAnnouncedLevels, with state.announcements.RE/.KONTRA kept as a
+// derived view (rebuilt by recomputeAnnouncements) of whichever players currently belong to each
+// team. This matters because Genschern can reassign a player to the other team mid-round: per
+// documented Genscher rules, "all announcements made during play remain valid" and the round is
+// re-evaluated from the new teams - so a "keine 90" said while on Re should follow that player to
+// Kontra, not stay stuck under Re for teammates who never made the claim.
+function recomputeAnnouncements() {
+  const fresh = { RE: { partnership: false, levels: [] }, KONTRA: { partnership: false, levels: [] } };
+  for (let i = 0; i < 4; i++) {
+    const team = state.teams[i];
+    if (team !== "RE" && team !== "KONTRA") continue; // undecided (mid-Hochzeit) - nothing to attribute yet
+    if (state.playerAnnouncedPartnership[i]) fresh[team].partnership = true;
+    for (const level of state.playerAnnouncedLevels[i]) {
+      if (!fresh[team].levels.includes(level)) fresh[team].levels.push(level);
+    }
+  }
+  state.announcements = fresh;
+}
+
 function announcePartnership(playerIdx) {
   if (!canAnnouncePartnership(playerIdx)) return;
   const team = state.teams[playerIdx];
-  state.announcements[team].partnership = true;
+  state.playerAnnouncedPartnership[playerIdx] = true;
+  recomputeAnnouncements();
   revealPlayer(playerIdx);
   log(`${playerName(playerIdx)} announces <b>"${team === "RE" ? "Re" : "Kontra"}"!</b>`, true);
   renderAll();
@@ -649,7 +676,8 @@ function announcePartnership(playerIdx) {
 function announceAbsage(playerIdx, level) {
   if (!canAnnounceAbsage(playerIdx, level)) return;
   const team = state.teams[playerIdx];
-  state.announcements[team].levels.push(level);
+  state.playerAnnouncedLevels[playerIdx].push(level);
+  recomputeAnnouncements();
   revealPlayer(playerIdx);
   const label = level === "schwarz" ? "schwarz" : `keine ${level}`;
   log(`${playerName(playerIdx)} calls <b>"${label}"</b> against the opposing team!`, true);
@@ -901,8 +929,10 @@ function resolveGenschernChoice(chooserIdx, partnerIdx) {
   state.revealed = state.teams.slice(); // declaring it is inherently public
   // Tricks already played were tallied under the OLD team split - rebuild the Re/Kontra totals
   // from the per-player ledgers now that the teams have changed, or points/bonuses already earned
-  // would stay stuck under whichever side used to hold that player.
+  // would stay stuck under whichever side used to hold that player. Same for announcements: a
+  // "keine 90" said while on Re should follow its announcer to Kontra, not stay filed under Re.
   recomputeTeamTotals();
+  recomputeAnnouncements();
   log(`${playerName(chooserIdx)} calls <b>"Genscher"</b> and picks ${playerName(partnerIdx)} as their new partner for the rest of the round!`, true);
   if (chooserIdx === 0) unlockAchievement("genscher");
   renderAll();
