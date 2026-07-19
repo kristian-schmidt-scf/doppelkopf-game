@@ -103,6 +103,66 @@ function readSettingsFromUI() {
   settings.schmeissen = document.getElementById("setting-schmeissen").checked;
 }
 
+/* ============================== ACHIEVEMENTS ============================= */
+// Permanent, cross-match unlocks for the human player (index 0), persisted in localStorage so
+// they survive page reloads. Each check lives right next to the game event it depends on, rather
+// than as a generic polling scan, since the conditions aren't uniform (some are single events,
+// some are round outcomes, some are lifetime counters).
+
+const ACHIEVEMENTS = [
+  { id: "first_win", name: "First Victory", icon: "🏆", desc: "Win your first round." },
+  { id: "solo_win", name: "Solo Virtuoso", icon: "🎻", desc: "Win a round playing a Solo, alone against the other three." },
+  { id: "grand_slam", name: "Grand Slam", icon: "⚫", desc: "Win a round holding the opponents to 0 card points." },
+  { id: "doppelkopf_trick", name: "Doppelkopf!", icon: "💥", desc: "Your team wins a trick worth 40 or more points." },
+  { id: "fox_hunter", name: "Fox Hunter", icon: "🦊", desc: "Your team catches a Fuchs (an opponent's Diamond Ace)." },
+  { id: "karlchen", name: "Karlchen", icon: "🃏", desc: "Your team wins the last trick with the Club Jack." },
+  { id: "wedding_bells", name: "Wedding Bells", icon: "💍", desc: "A Hochzeit finds its partner via the clarification trick." },
+  { id: "shotgun_wedding", name: "Shotgun Wedding", icon: "💨", desc: "A Hochzeit converts into a Solo after its announcer sweeps the first three tricks." },
+  { id: "trading_places", name: "Trading Places", icon: "🔄", desc: "Win a round where Armut (poverty) was declared." },
+  { id: "schweinchen_dealt", name: "Schweinchen!", icon: "🐖", desc: "Get dealt both Diamond Aces in the same hand." },
+  { id: "genscher", name: "Genscher!", icon: "🤝", desc: "Use Genschern to pick a new partner mid-round." },
+  { id: "table_flip", name: "Table Flip", icon: "🔀", desc: "Throw in a hand with 5 or more Kings (Schmeissen)." },
+  { id: "called_it", name: "Called It", icon: "🎯", desc: "Win a round after your side's \"schwarz\" call holds up." },
+  { id: "high_roller", name: "High Roller", icon: "💰", desc: "Win a round worth 5 or more points." },
+  { id: "five_wins", name: "On a Roll", icon: "🔥", desc: "Win 5 rounds total." },
+  { id: "twentyfive_wins", name: "Doppelkopf Master", icon: "👑", desc: "Win 25 rounds total." },
+];
+
+const ACHIEVEMENTS_STORAGE_KEY = "doppelkopf-achievements-v1";
+
+function loadAchievementState() {
+  try {
+    const raw = localStorage.getItem(ACHIEVEMENTS_STORAGE_KEY);
+    if (raw) return JSON.parse(raw);
+  } catch (e) { /* localStorage unavailable - achievements just won't persist this session */ }
+  return { unlocked: {}, roundsWon: 0 };
+}
+
+function saveAchievementState() {
+  try { localStorage.setItem(ACHIEVEMENTS_STORAGE_KEY, JSON.stringify(achievementState)); }
+  catch (e) { /* ignore - nothing more we can do without storage */ }
+}
+
+const achievementState = loadAchievementState();
+
+function unlockAchievement(id) {
+  if (achievementState.unlocked[id]) return;
+  achievementState.unlocked[id] = new Date().toISOString();
+  saveAchievementState();
+  const def = ACHIEVEMENTS.find(a => a.id === id);
+  if (def) showAchievementToast(def);
+  renderAchievementsPanel();
+}
+
+function recordHumanRoundResult(won) {
+  if (!won) return;
+  achievementState.roundsWon++;
+  if (achievementState.roundsWon === 1) unlockAchievement("first_win");
+  if (achievementState.roundsWon >= 5) unlockAchievement("five_wins");
+  if (achievementState.roundsWon >= 25) unlockAchievement("twentyfive_wins");
+  saveAchievementState();
+}
+
 /* ============================== STATE =================================== */
 
 const state = {
@@ -405,6 +465,7 @@ function resolveBidding() {
 
 function schmeissenRedeal(playerIdx) {
   log(`${playerName(playerIdx)} holds 5 or more Kings and throws in the hand - <b>Schmeissen!</b> No round played; the same dealer redeals.`, true);
+  if (playerIdx === 0) unlockAchievement("table_flip");
   dealNewRound(true);
 }
 
@@ -420,6 +481,7 @@ function detectSchweinchenAndGenschern() {
   state.trumpRankMap = new Map(state.trumpOrder.map((k, i) => [k, i]));
   if (schweinchenPlayer !== null) {
     log(`${playerName(schweinchenPlayer)} holds both Diamond Aces - <b>Schweinchen!</b> They are now the single highest trump, above the Ten of Hearts.`, true);
+    if (schweinchenPlayer === 0) unlockAchievement("schweinchen_dealt");
   }
 
   state.genschernPlayer = null;
@@ -825,6 +887,7 @@ function resolveGenschernChoice(chooserIdx, partnerIdx) {
   // would stay stuck under whichever side used to hold that player.
   recomputeTeamTotals();
   log(`${playerName(chooserIdx)} calls <b>"Genscher"</b> and picks ${playerName(partnerIdx)} as their new partner for the rest of the round!`, true);
+  if (chooserIdx === 0) unlockAchievement("genscher");
   renderAll();
 }
 
@@ -917,6 +980,7 @@ function resolveTrick() {
       state.hochzeitResolved = true;
       log(`${playerName(winnerIdx)} wins the clarification trick and becomes ${playerName(state.hochzeitAnnouncer)}'s partner!`, true);
       revealPlayer(winnerIdx);
+      unlockAchievement("wedding_bells");
       for (let i = 1; i <= 3; i++) aiConsiderPartnership(i);
     } else if (state.trickNumber === 2) {
       // this is about to be the 3rd trick and the announcer has won all of them - auto-solo.
@@ -930,6 +994,7 @@ function resolveTrick() {
       state.trumpRankMap = new Map(state.trumpOrder.map((k, i) => [k, i]));
       state.revealed = state.teams.slice();
       log(`${playerName(state.hochzeitAnnouncer)} took the first three tricks alone - the Hochzeit automatically becomes a <b>Diamonds Solo</b>! (score now tripled)`, true);
+      unlockAchievement("shotgun_wedding");
     }
   }
 
@@ -937,13 +1002,17 @@ function resolveTrick() {
   const winningTeam = state.teams[winnerIdx];
 
   state.playerPoints[winnerIdx] += trickPoints;
-  if (trickPoints >= 40) state.playerDoppelkopf[winnerIdx]++;
+  if (trickPoints >= 40) {
+    state.playerDoppelkopf[winnerIdx]++;
+    if (winningTeam === state.teams[0]) unlockAchievement("doppelkopf_trick");
+  }
 
   if (settings.fuchs) {
     for (const play of state.trick) {
       if (play.card.suit === "D" && play.card.rank === "A" && state.teams[play.playerIndex] !== winningTeam) {
         state.playerFuchs[winnerIdx]++;
         log(`${playerName(winnerIdx)}'s team catches a <b>Fuchs</b> (Diamond Ace)!`, true);
+        if (winningTeam === state.teams[0]) unlockAchievement("fox_hunter");
       }
     }
   }
@@ -952,6 +1021,7 @@ function resolveTrick() {
     if (clubJackPlay && clubJackPlay.playerIndex === winnerIdx) {
       state.playerKarlchen[winnerIdx] = 1;
       log(`${playerName(winnerIdx)} takes the last trick with the Club Jack - <b>Karlchen!</b>`, true);
+      if (winningTeam === state.teams[0]) unlockAchievement("karlchen");
     }
   }
   recomputeTeamTotals();
@@ -1072,6 +1142,16 @@ function endRound() {
   log(`Round ${state.roundNumber} over (${gameTypeDisplayLabel()}). Re: ${state.reCardPoints} pts, Kontra: ${state.kontraCardPoints} pts. ${reWins ? "RE" : "KONTRA"} wins the round.`, true);
 
   state.revealed = state.teams.slice();
+
+  const humanWon = state.teams[0] === winnerTeam;
+  recordHumanRoundResult(humanWon);
+  if (humanWon) {
+    if (state.isSolo && state.soloPlayer === 0) unlockAchievement("solo_win");
+    if (loserPoints === 0) unlockAchievement("grand_slam");
+    if (gameValue >= 5) unlockAchievement("high_roller");
+    if (state.isArmut) unlockAchievement("trading_places");
+    if (state.announcements[winnerTeam].levels.includes("schwarz")) unlockAchievement("called_it");
+  }
 
   showRoundSummary({ reWins, gameValue, net, loserPoints, announceBonus, winnerAbsageBonus, loserBrokenAbsageBonus, roundSwings });
   renderAll();
@@ -1273,6 +1353,48 @@ function renderAll() {
   renderGenschernModal();
 }
 
+/* ============================== ACHIEVEMENTS UI ============================ */
+
+function renderAchievementsPanel() {
+  const summary = document.getElementById("achievements-summary");
+  const content = document.getElementById("achievements-content");
+  if (!summary || !content) return;
+
+  const unlockedCount = ACHIEVEMENTS.filter(a => achievementState.unlocked[a.id]).length;
+  summary.textContent = `Achievements (${unlockedCount}/${ACHIEVEMENTS.length})`;
+
+  content.innerHTML = ACHIEVEMENTS.map(a => {
+    const unlockedAt = achievementState.unlocked[a.id];
+    const dateHtml = unlockedAt ? `<div class="achievement-date">Unlocked ${new Date(unlockedAt).toLocaleDateString()}</div>` : "";
+    return `
+      <div class="achievement ${unlockedAt ? "unlocked" : "locked"}">
+        <div class="achievement-icon">${a.icon}</div>
+        <div class="achievement-body">
+          <div class="achievement-name">${a.name}</div>
+          <div class="achievement-desc">${a.desc}</div>
+          ${dateHtml}
+        </div>
+      </div>
+    `;
+  }).join("");
+}
+
+let achievementToastTimer = null;
+function showAchievementToast(def) {
+  const el = document.getElementById("achievement-toast");
+  if (!el) return;
+  el.innerHTML = `
+    <div class="achievement-icon">${def.icon}</div>
+    <div>
+      <div class="achievement-toast-title">Achievement unlocked</div>
+      <div class="achievement-toast-name">${def.name}</div>
+    </div>
+  `;
+  el.classList.remove("hidden");
+  clearTimeout(achievementToastTimer);
+  achievementToastTimer = setTimeout(() => el.classList.add("hidden"), 3500);
+}
+
 /* ============================== MODALS ===================================== */
 
 function showModal(html) {
@@ -1397,5 +1519,6 @@ document.addEventListener("DOMContentLoaded", () => {
     document.getElementById(`btn-absage-${level}`).addEventListener("click", () => announceAbsage(0, level));
   }
   renderScoreboard();
+  renderAchievementsPanel();
   log("Welcome to Doppelkopf! Adjust house rules below, then click \"Start Match\".", true);
 });
