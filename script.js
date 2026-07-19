@@ -506,7 +506,24 @@ function startNormalRound() {
   detectSchweinchenAndGenschern();
   const clubQueenHtml = cardLabelHtml({ suit: "C", rank: "Q" });
   log(`Normal game. You hold ${state.teams[0] === "RE" ? clubQueenHtml : "no " + clubQueenHtml} - you play for <b>${state.teams[0]}</b>.`, true);
-  for (let idx = 1; idx <= 3; idx++) aiConsiderPartnership(idx);
+
+  // Both copies of the Queen of Clubs in the same hand ("stille Hochzeit"): that player is
+  // automatically alone against the other three. Since they passed up the chance to seek a
+  // partner via Hochzeit (or the house rule is off), this plays out - and scores - like a Solo:
+  // tripled stakes, same as an announced one, even though the trump order stays the Normal one.
+  const reCount = state.teams.filter(t => t === "RE").length;
+  if (reCount === 1) {
+    state.isSolo = true;
+    state.soloPlayer = state.teams.indexOf("RE");
+    state.revealed[state.soloPlayer] = "RE"; // being alone is inherently public, same as a declared solo
+    log(`${playerName(state.soloPlayer)} holds both Club Queens and plays alone against the other three - <b>score tripled!</b>`, true);
+  }
+
+  // Matches startSoloRound: the three defenders in a solo aren't offered an automatic Kontra
+  // announcement (only relevant for the normal 2v2 case below).
+  if (!state.isSolo) {
+    for (let idx = 1; idx <= 3; idx++) aiConsiderPartnership(idx);
+  }
   beginPlayPhase();
 }
 
@@ -1195,7 +1212,7 @@ function renderHand() {
     });
     container.appendChild(el);
   }
-  const teamLabel = state.teams[0] ? (state.isSolo && state.soloPlayer === 0 ? GAME_TYPE_LABEL[state.gameType] : state.teams[0]) : "undecided";
+  const teamLabel = state.teams[0] ? (state.isSolo && state.soloPlayer === 0 ? gameTypeDisplayLabel() : state.teams[0]) : "undecided";
   document.getElementById("your-team").textContent = teamLabel;
   document.getElementById("your-points-tag").innerHTML = pointsTagHtml(0);
 }
@@ -1291,6 +1308,9 @@ function renderBidding() {
 function gameTypeDisplayLabel() {
   if (state.isHochzeit) return state.hochzeitResolved ? "Hochzeit" : "Hochzeit (partner not yet determined)";
   if (state.isArmut) return "Armut";
+  // A "stille Hochzeit" - both Club Queens landed in one hand and nobody sought a partner - keeps
+  // the Normal trump order but plays and scores like a Solo (see startNormalRound).
+  if (state.isSolo && state.gameType === GAME_TYPES.NORMAL) return "Solo (both ♣Q)";
   return GAME_TYPE_LABEL[state.gameType];
 }
 
@@ -1298,7 +1318,7 @@ function renderGameTypeBanner() {
   const el = document.getElementById("game-type-banner");
   if (!el) return;
   if (!state.roundActive || state.phase !== "playing") { el.textContent = ""; return; }
-  el.textContent = state.gameType === GAME_TYPES.NORMAL && !state.isHochzeit && !state.isArmut ? "" : gameTypeDisplayLabel();
+  el.textContent = state.gameType === GAME_TYPES.NORMAL && !state.isHochzeit && !state.isArmut && !state.isSolo ? "" : gameTypeDisplayLabel();
 }
 
 function renderTrick() {
