@@ -131,7 +131,7 @@ main {
   height: 52px;
   margin-left: -18px;
   border-radius: 5px;
-  background: repeating-linear-gradient(45deg, #7a1f1f, #7a1f1f 4px, #5c1414 4px, #5c1414 8px);
+  background: #c8102e url("cardback.png") center / cover no-repeat;
   border: 1px solid #2a0a0a;
   box-shadow: 0 2px 4px rgba(0,0,0,0.5);
 }
