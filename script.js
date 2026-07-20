@@ -126,16 +126,42 @@ const ACHIEVEMENTS = [
   { id: "high_roller", name: "High Roller", icon: "💰", desc: "Win a round worth 5 or more points." },
   { id: "five_wins", name: "On a Roll", icon: "🔥", desc: "Win 5 rounds total." },
   { id: "twentyfive_wins", name: "Doppelkopf Master", icon: "👑", desc: "Win 25 rounds total." },
+  { id: "century_club", name: "Century Club", icon: "🏛️", desc: "Win 100 rounds total." },
+  { id: "iron_constitution", name: "Iron Constitution", icon: "🪑", desc: "Play 100 rounds, win or lose." },
+  { id: "hot_hand", name: "Hot Hand", icon: "🌶️", desc: "Win 3 rounds in a row." },
+  { id: "comeback_kid", name: "Comeback Kid", icon: "🐣", desc: "Win a round right after losing the previous one." },
+  { id: "solo_collector", name: "Solo Collector", icon: "🎭", desc: "Win at least once with every Solo variant: Clubs, Spades, Hearts, Diamonds, Queens, Jacks, and Fleshless." },
+  { id: "regular", name: "Regular", icon: "📅", desc: "Play rounds on 5 different days." },
+  { id: "loyal_underdog", name: "Loyal Underdog", icon: "🛶", desc: "Win 10 rounds playing for Kontra." },
+  { id: "genscher_regular", name: "Serial Genscherer", icon: "🔁", desc: "Call Genschern 10 times over your lifetime." },
+  { id: "icarus", name: "Icarus", icon: "🪽", desc: "Lose a round because your own side's Absage flew too close to the sun and failed." },
+  { id: "chosen_one", name: "The Chosen One", icon: "✨", desc: "Get picked as someone else's Genschern partner - and win the round." },
+  { id: "backfired", name: "Backfired", icon: "🪃", desc: "Call Genschern yourself and still lose the round." },
+  { id: "silent_but_deadly", name: "Silent But Deadly", icon: "🤫", desc: "Win a round with a stille Hochzeit - both Club Queens, no partner sought." },
+  { id: "full_house", name: "Full House", icon: "🎰", desc: "Win a round in which your team banks a Fuchs, a Karlchen, and a Doppelkopf bonus." },
+  { id: "nail_biter", name: "Nail Biter", icon: "😰", desc: "Win a round decided by 6 card points or fewer." },
+  { id: "giant_slayer", name: "Giant Slayer", icon: "🗡️", desc: "Win a round against opponents who had openly announced their partnership." },
+  { id: "david_vs_goliath", name: "David vs. Goliath", icon: "🪨", desc: "Win a Solo round against opponents who announced against you." },
+  { id: "night_owl", name: "Night Owl", icon: "🦉", desc: "Win a round between midnight and 4am." },
+  { id: "perfect_storm", name: "Perfect Storm", icon: "⛈️", desc: "Win a round worth 8 or more points." },
+  { id: "double_fox", name: "Double Fox", icon: "🦊", desc: "Catch both of the opponents' Diamond Aces in a single round." },
+  { id: "rags_to_riches", name: "Rags to Riches", icon: "💸", desc: "Win a round after declaring Armut (poverty) yourself." },
 ];
 
 const ACHIEVEMENTS_STORAGE_KEY = "doppelkopf-achievements-v1";
 
 function loadAchievementState() {
+  // Defaults double as a migration for saves made before the long-term counters below existed -
+  // Object.assign backfills any field missing from an older saved blob.
+  const fresh = {
+    unlocked: {}, roundsWon: 0, roundsPlayed: 0, winStreak: 0, lastRoundWon: null,
+    kontraWins: 0, genscherCount: 0, soloTypesWon: [], daysPlayed: [],
+  };
   try {
     const raw = localStorage.getItem(ACHIEVEMENTS_STORAGE_KEY);
-    if (raw) return JSON.parse(raw);
+    if (raw) return Object.assign(fresh, JSON.parse(raw));
   } catch (e) { /* localStorage unavailable - achievements just won't persist this session */ }
-  return { unlocked: {}, roundsWon: 0 };
+  return fresh;
 }
 
 function saveAchievementState() {
@@ -155,11 +181,29 @@ function unlockAchievement(id) {
 }
 
 function recordHumanRoundResult(won) {
-  if (!won) return;
+  achievementState.roundsPlayed++;
+  if (achievementState.roundsPlayed >= 100) unlockAchievement("iron_constitution");
+
+  const today = new Date().toISOString().slice(0, 10);
+  if (!achievementState.daysPlayed.includes(today)) achievementState.daysPlayed.push(today);
+  if (achievementState.daysPlayed.length >= 5) unlockAchievement("regular");
+
+  if (won && achievementState.lastRoundWon === false) unlockAchievement("comeback_kid");
+  achievementState.lastRoundWon = won;
+
+  if (!won) {
+    achievementState.winStreak = 0;
+    saveAchievementState();
+    return;
+  }
+
   achievementState.roundsWon++;
+  achievementState.winStreak++;
+  if (achievementState.winStreak >= 3) unlockAchievement("hot_hand");
   if (achievementState.roundsWon === 1) unlockAchievement("first_win");
   if (achievementState.roundsWon >= 5) unlockAchievement("five_wins");
   if (achievementState.roundsWon >= 25) unlockAchievement("twentyfive_wins");
+  if (achievementState.roundsWon >= 100) unlockAchievement("century_club");
   saveAchievementState();
 }
 
@@ -213,10 +257,13 @@ const state = {
   hochzeitAnnouncer: null,
   hochzeitResolved: true,
   isArmut: false,
+  armutPlayer: null,
 
   genschernPlayer: null,
   genschernDKPlayed: 0,
   genschernUsed: false,
+  genschernPickedHuman: false, // true if some other player's Genschern call chose the human as partner
+  genschernUsedByHuman: false, // true if the human is the one who called Genschern this round
   pendingGenschernChooser: null, // set while waiting on the human's partner pick
 
   biddingOrder: [],
@@ -350,9 +397,12 @@ function dealNewRound(redeal) {
   state.hochzeitAnnouncer = null;
   state.hochzeitResolved = true;
   state.isArmut = false;
+  state.armutPlayer = null;
   state.genschernPlayer = null;
   state.genschernDKPlayed = 0;
   state.genschernUsed = false;
+  state.genschernPickedHuman = false;
+  state.genschernUsedByHuman = false;
   state.pendingGenschernChooser = null;
 
   document.getElementById("btn-new-round").classList.add("hidden");
@@ -560,6 +610,7 @@ function startHochzeitRound(announcerIdx) {
 function startArmutRound(armutPlayerIdx) {
   state.gameType = GAME_TYPES.NORMAL;
   state.isArmut = true;
+  state.armutPlayer = armutPlayerIdx;
   state.trumpOrder = buildTrumpOrder(GAME_TYPES.NORMAL, null);
   state.trumpRankMap = new Map(state.trumpOrder.map((k, i) => [k, i]));
 
@@ -934,7 +985,14 @@ function resolveGenschernChoice(chooserIdx, partnerIdx) {
   recomputeTeamTotals();
   recomputeAnnouncements();
   log(`${playerName(chooserIdx)} calls <b>"Genscher"</b> and picks ${playerName(partnerIdx)} as their new partner for the rest of the round!`, true);
-  if (chooserIdx === 0) unlockAchievement("genscher");
+  if (chooserIdx === 0) {
+    unlockAchievement("genscher");
+    state.genschernUsedByHuman = true;
+    achievementState.genscherCount++;
+    if (achievementState.genscherCount >= 10) unlockAchievement("genscher_regular");
+    saveAchievementState();
+  }
+  if (partnerIdx === 0 && chooserIdx !== 0) state.genschernPickedHuman = true;
   renderAll();
 }
 
@@ -1196,8 +1254,44 @@ function endRound() {
     if (state.isSolo && state.soloPlayer === 0) unlockAchievement("solo_win");
     if (loserPoints === 0) unlockAchievement("grand_slam");
     if (gameValue >= 5) unlockAchievement("high_roller");
+    if (gameValue >= 8) unlockAchievement("perfect_storm");
     if (state.isArmut) unlockAchievement("trading_places");
+    if (state.isArmut && state.armutPlayer === 0) unlockAchievement("rags_to_riches");
     if (state.announcements[winnerTeam].levels.includes("schwarz")) unlockAchievement("called_it");
+    if (state.isSolo && state.soloPlayer === 0 && state.gameType === GAME_TYPES.NORMAL) unlockAchievement("silent_but_deadly");
+    if (state.genschernPickedHuman) unlockAchievement("chosen_one");
+    if (Math.abs(state.reCardPoints - state.kontraCardPoints) <= 6) unlockAchievement("nail_biter");
+    if (state.announcements[loserTeam].partnership) unlockAchievement("giant_slayer");
+
+    if (isSoloType(state.gameType) && state.soloPlayer === 0) {
+      if (!achievementState.soloTypesWon.includes(state.gameType)) {
+        achievementState.soloTypesWon.push(state.gameType);
+        saveAchievementState();
+      }
+      if (SOLO_GAME_TYPES.every(t => achievementState.soloTypesWon.includes(t))) unlockAchievement("solo_collector");
+    }
+    if (state.isSolo && state.soloPlayer === 0 &&
+      (state.announcements[loserTeam].partnership || state.announcements[loserTeam].levels.length > 0)) {
+      unlockAchievement("david_vs_goliath");
+    }
+
+    if (winnerTeam === "KONTRA") {
+      achievementState.kontraWins++;
+      if (achievementState.kontraWins >= 10) unlockAchievement("loyal_underdog");
+      saveAchievementState();
+    }
+
+    const winnerFuchs = winnerTeam === "RE" ? state.reFuchs : state.kontraFuchs;
+    const winnerKarlchen = winnerTeam === "RE" ? state.reKarlchen : state.kontraKarlchen;
+    const winnerDoppelkopf = winnerTeam === "RE" ? state.reDoppelkopf : state.kontraDoppelkopf;
+    if (winnerFuchs >= 2) unlockAchievement("double_fox");
+    if (winnerFuchs >= 1 && winnerKarlchen >= 1 && winnerDoppelkopf >= 1) unlockAchievement("full_house");
+
+    const hour = new Date().getHours();
+    if (hour >= 0 && hour < 4) unlockAchievement("night_owl");
+  } else {
+    if (contractFlip && state.teams[0] === contractFlip) unlockAchievement("icarus");
+    if (state.genschernUsedByHuman) unlockAchievement("backfired");
   }
 
   showRoundSummary({ reWins, gameValue, net, loserPoints, announceBonus, winnerAbsageBonus, loserBrokenAbsageBonus, roundSwings });
